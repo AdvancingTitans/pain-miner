@@ -1,0 +1,704 @@
+{
+  "command": "run",
+  "version": "2.0",
+  "as_of": "2026-07-05T16:57:30.473209+00:00",
+  "target": "独立SaaS创业者",
+  "plan": {
+    "target": "独立SaaS创业者",
+    "language": "zh",
+    "matched_keywords": [
+      "developer",
+      "programmer"
+    ],
+    "reddit_subs": [
+      "SaaS",
+      "Entrepreneur",
+      "startups",
+      "webdev",
+      "programming",
+      "SideProject"
+    ],
+    "hn_queries": [
+      "saas founder",
+      "indie hacker",
+      "developer tools"
+    ],
+    "v2ex_nodes": [
+      "programmer",
+      "create",
+      "cloud",
+      "career"
+    ],
+    "browser_fallback_urls": [
+      "https://old.reddit.com/search/?q=%E7%8B%AC%E7%AB%8BSaaS%E5%88%9B%E4%B8%9A%E8%80%85&sort=top&t=week",
+      "https://hn.algolia.com/?q=%E7%8B%AC%E7%AB%8BSaaS%E5%88%9B%E4%B8%9A%E8%80%85&sort=byDate",
+      "https://www.v2ex.com/go/create?q=%E7%8B%AC%E7%AB%8BSaaS%E5%88%9B%E4%B8%9A%E8%80%85"
+    ],
+    "note": "Agent may override subs/queries; verify sub names exist before scan."
+  },
+  "window_hours": 168,
+  "filters": {
+    "min_score": 30,
+    "min_comments": 15
+  },
+  "step_a": {
+    "qualified_communities": [
+      {
+        "platform": "reddit",
+        "community": "r/Entrepreneur",
+        "subreddit": "r/Entrepreneur",
+        "members": 5225616,
+        "posts_in_window": 50,
+        "comments_in_window": 51,
+        "avg_comments": 1.0,
+        "active_threads_ge3": 0,
+        "heat_index": 114.4,
+        "top_pain_themes": [
+          "general (36)",
+          "support/community (7)",
+          "tools/workflow (5)",
+          "confusion (2)"
+        ],
+        "qualified": true,
+        "example_posts": [
+          {
+            "title": "Need a Business Partner in US",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/Entrepreneur/comments/1umov6h/need_a_business_partner_in_us/"
+          },
+          {
+            "title": "Sto cercando di capire come valutare in modo concreto la profittabilità dei prodotti in Amazon FBA",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/Entrepreneur/comments/1uo703w/sto_cercando_di_capire_come_valutare_in_modo/"
+          },
+          {
+            "title": "What do you like and don’t like about usual marketing content out there in 2026?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/Entrepreneur/comments/1uo5v3c/what_do_you_like_and_dont_like_about_usual/"
+          },
+          {
+            "title": "How do decide what's next?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/Entrepreneur/comments/1uo2zbg/how_do_decide_whats_next/"
+          },
+          {
+            "title": "If you had to start an online business from scratch today, what would you build?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/Entrepreneur/comments/1uo0zjk/if_you_had_to_start_an_online_business_from/"
+          }
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/startups",
+        "subreddit": "r/startups",
+        "members": 2089127,
+        "posts_in_window": 50,
+        "comments_in_window": 51,
+        "avg_comments": 1.0,
+        "active_threads_ge3": 0,
+        "heat_index": 114.4,
+        "top_pain_themes": [
+          "general (39)",
+          "tools/workflow (8)",
+          "cost/pricing (5)",
+          "learning curve (3)"
+        ],
+        "qualified": true,
+        "example_posts": [
+          {
+            "title": "[ Removed by moderator ]",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/startups/comments/1uo4sk2/made_a_small_site_to_check_attendance_so_i_stop/"
+          },
+          {
+            "title": "[ Removed by moderator ]",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/startups/comments/1uo02az/i_will_not_promote_how_did_you_get_your_first/"
+          },
+          {
+            "title": "[ Removed by moderator ]",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/startups/comments/1unzxr2/i_will_not_promote_fireflame_dot_ai_i_need_you/"
+          },
+          {
+            "title": "[ Removed by moderator ]",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/startups/comments/1unzm80/i_will_not_promote_fireflameai_although_we_offer/"
+          },
+          {
+            "title": "[ Removed by moderator ]",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/startups/comments/1unx9rg/i_will_not_promote_masters_thesis_looking_for/"
+          }
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/webdev",
+        "subreddit": "r/webdev",
+        "members": 3276421,
+        "posts_in_window": 100,
+        "comments_in_window": 52,
+        "avg_comments": 0.5,
+        "active_threads_ge3": 0,
+        "heat_index": 216.3,
+        "top_pain_themes": [
+          "general (50)",
+          "tools/workflow (41)",
+          "time/friction (7)",
+          "cost/pricing (6)"
+        ],
+        "qualified": true,
+        "example_posts": [
+          {
+            "title": "Looking for feedback on an interactive backend architecture simulator I'm building",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/webdev/comments/1uo70k6/looking_for_feedback_on_an_interactive_backend/"
+          },
+          {
+            "title": "**If you could magically eliminate ONE pain point from your daily workflow, what would it be?**\n\nFor freelancers, designers, and Figma users:",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/webdev/comments/1uo6c3f/if_you_could_magically_eliminate_one_pain_point/"
+          },
+          {
+            "title": "Which European dev tools are actually good enough to replace US-based services?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/webdev/comments/1uo69b2/which_european_dev_tools_are_actually_good_enough/"
+          },
+          {
+            "title": "Keycloak: A Magic Auth Module That Solves Everything, or a Code-Crutch Hell?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/webdev/comments/1uo68mi/keycloak_a_magic_auth_module_that_solves/"
+          },
+          {
+            "title": "How do you monitor your site's health?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/webdev/comments/1uo5fd7/how_do_you_monitor_your_sites_health/"
+          }
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/programming",
+        "subreddit": "r/programming",
+        "members": 6896084,
+        "posts_in_window": 100,
+        "comments_in_window": 437,
+        "avg_comments": 4.4,
+        "active_threads_ge3": 9,
+        "heat_index": 391.9,
+        "top_pain_themes": [
+          "general (71)",
+          "tools/workflow (19)",
+          "learning curve (10)",
+          "cost/pricing (4)"
+        ],
+        "qualified": true,
+        "example_posts": [
+          {
+            "title": "Linux has officially won",
+            "score": 1444,
+            "comments": 345,
+            "url": "https://www.reddit.com/r/programming/comments/1um497y/linux_has_officially_won/"
+          },
+          {
+            "title": "Hunting a 16-year-old SQLite bug with TLA+: is dqlite affected?",
+            "score": 106,
+            "comments": 4,
+            "url": "https://www.reddit.com/r/programming/comments/1umi3j4/hunting_a_16yearold_sqlite_bug_with_tla_is_dqlite/"
+          },
+          {
+            "title": "Understanding Traceroute",
+            "score": 31,
+            "comments": 13,
+            "url": "https://www.reddit.com/r/programming/comments/1um4hyx/understanding_traceroute/"
+          },
+          {
+            "title": "I built a free JSON Parser that runs entirely in your browser (dark mode, tree view, no sign-up)",
+            "score": 0,
+            "comments": 6,
+            "url": "https://www.reddit.com/r/programming/comments/1ulwrii/i_built_a_free_json_parser_that_runs_entirely_in/"
+          },
+          {
+            "title": "Extralite 3.0.0 Released",
+            "score": 0,
+            "comments": 5,
+            "url": "https://www.reddit.com/r/programming/comments/1umc8nm/extralite_300_released/"
+          }
+        ]
+      }
+    ],
+    "all_communities": [
+      {
+        "platform": "reddit",
+        "community": "r/SaaS",
+        "subreddit": "r/SaaS",
+        "members": 743808,
+        "posts_in_window": 100,
+        "comments_in_window": 18,
+        "avg_comments": 0.2,
+        "active_threads_ge3": 0,
+        "heat_index": 207.8,
+        "top_pain_themes": [
+          "tools/workflow (50)",
+          "general (41)",
+          "learning curve (13)",
+          "cost/pricing (13)"
+        ],
+        "qualified": false,
+        "example_posts": [
+          {
+            "title": "Opus Clip Alternatives .!",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/SaaS/comments/1uo6ziu/opus_clip_alternatives/"
+          },
+          {
+            "title": "My new platform - Centralee",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/SaaS/comments/1uo6u8d/my_new_platform_centralee/"
+          },
+          {
+            "title": "The 'Silence Tax' is real. If you're an SMB owner, you know that missing a call often means missing a contract. Most SaaS solutions for 'meetings' focus on what happens during the call—but what about the call that never gets answered?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/SaaS/comments/1uo6bp8/the_silence_tax_is_real_if_youre_an_smb_owner_you/"
+          },
+          {
+            "title": "First time building a payment system—where should I start?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/SaaS/comments/1uo5v7t/first_time_building_a_payment_systemwhere_should/"
+          },
+          {
+            "title": "I’ve been looking at the 'Mathematics of a Missed Call' lately. For most SMBs, a single missed inquiry isn't just a notification—it's a 'Silence Tax' that compounds.",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/SaaS/comments/1uo5tnj/ive_been_looking_at_the_mathematics_of_a_missed/"
+          }
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/Entrepreneur",
+        "subreddit": "r/Entrepreneur",
+        "members": 5225616,
+        "posts_in_window": 50,
+        "comments_in_window": 51,
+        "avg_comments": 1.0,
+        "active_threads_ge3": 0,
+        "heat_index": 114.4,
+        "top_pain_themes": [
+          "general (36)",
+          "support/community (7)",
+          "tools/workflow (5)",
+          "confusion (2)"
+        ],
+        "qualified": true,
+        "example_posts": [
+          {
+            "title": "Need a Business Partner in US",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/Entrepreneur/comments/1umov6h/need_a_business_partner_in_us/"
+          },
+          {
+            "title": "Sto cercando di capire come valutare in modo concreto la profittabilità dei prodotti in Amazon FBA",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/Entrepreneur/comments/1uo703w/sto_cercando_di_capire_come_valutare_in_modo/"
+          },
+          {
+            "title": "What do you like and don’t like about usual marketing content out there in 2026?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/Entrepreneur/comments/1uo5v3c/what_do_you_like_and_dont_like_about_usual/"
+          },
+          {
+            "title": "How do decide what's next?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/Entrepreneur/comments/1uo2zbg/how_do_decide_whats_next/"
+          },
+          {
+            "title": "If you had to start an online business from scratch today, what would you build?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/Entrepreneur/comments/1uo0zjk/if_you_had_to_start_an_online_business_from/"
+          }
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/startups",
+        "subreddit": "r/startups",
+        "members": 2089127,
+        "posts_in_window": 50,
+        "comments_in_window": 51,
+        "avg_comments": 1.0,
+        "active_threads_ge3": 0,
+        "heat_index": 114.4,
+        "top_pain_themes": [
+          "general (39)",
+          "tools/workflow (8)",
+          "cost/pricing (5)",
+          "learning curve (3)"
+        ],
+        "qualified": true,
+        "example_posts": [
+          {
+            "title": "[ Removed by moderator ]",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/startups/comments/1uo4sk2/made_a_small_site_to_check_attendance_so_i_stop/"
+          },
+          {
+            "title": "[ Removed by moderator ]",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/startups/comments/1uo02az/i_will_not_promote_how_did_you_get_your_first/"
+          },
+          {
+            "title": "[ Removed by moderator ]",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/startups/comments/1unzxr2/i_will_not_promote_fireflame_dot_ai_i_need_you/"
+          },
+          {
+            "title": "[ Removed by moderator ]",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/startups/comments/1unzm80/i_will_not_promote_fireflameai_although_we_offer/"
+          },
+          {
+            "title": "[ Removed by moderator ]",
+            "score": 1,
+            "comments": 2,
+            "url": "https://www.reddit.com/r/startups/comments/1unx9rg/i_will_not_promote_masters_thesis_looking_for/"
+          }
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/webdev",
+        "subreddit": "r/webdev",
+        "members": 3276421,
+        "posts_in_window": 100,
+        "comments_in_window": 52,
+        "avg_comments": 0.5,
+        "active_threads_ge3": 0,
+        "heat_index": 216.3,
+        "top_pain_themes": [
+          "general (50)",
+          "tools/workflow (41)",
+          "time/friction (7)",
+          "cost/pricing (6)"
+        ],
+        "qualified": true,
+        "example_posts": [
+          {
+            "title": "Looking for feedback on an interactive backend architecture simulator I'm building",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/webdev/comments/1uo70k6/looking_for_feedback_on_an_interactive_backend/"
+          },
+          {
+            "title": "**If you could magically eliminate ONE pain point from your daily workflow, what would it be?**\n\nFor freelancers, designers, and Figma users:",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/webdev/comments/1uo6c3f/if_you_could_magically_eliminate_one_pain_point/"
+          },
+          {
+            "title": "Which European dev tools are actually good enough to replace US-based services?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/webdev/comments/1uo69b2/which_european_dev_tools_are_actually_good_enough/"
+          },
+          {
+            "title": "Keycloak: A Magic Auth Module That Solves Everything, or a Code-Crutch Hell?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/webdev/comments/1uo68mi/keycloak_a_magic_auth_module_that_solves/"
+          },
+          {
+            "title": "How do you monitor your site's health?",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/webdev/comments/1uo5fd7/how_do_you_monitor_your_sites_health/"
+          }
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/programming",
+        "subreddit": "r/programming",
+        "members": 6896084,
+        "posts_in_window": 100,
+        "comments_in_window": 437,
+        "avg_comments": 4.4,
+        "active_threads_ge3": 9,
+        "heat_index": 391.9,
+        "top_pain_themes": [
+          "general (71)",
+          "tools/workflow (19)",
+          "learning curve (10)",
+          "cost/pricing (4)"
+        ],
+        "qualified": true,
+        "example_posts": [
+          {
+            "title": "Linux has officially won",
+            "score": 1444,
+            "comments": 345,
+            "url": "https://www.reddit.com/r/programming/comments/1um497y/linux_has_officially_won/"
+          },
+          {
+            "title": "Hunting a 16-year-old SQLite bug with TLA+: is dqlite affected?",
+            "score": 106,
+            "comments": 4,
+            "url": "https://www.reddit.com/r/programming/comments/1umi3j4/hunting_a_16yearold_sqlite_bug_with_tla_is_dqlite/"
+          },
+          {
+            "title": "Understanding Traceroute",
+            "score": 31,
+            "comments": 13,
+            "url": "https://www.reddit.com/r/programming/comments/1um4hyx/understanding_traceroute/"
+          },
+          {
+            "title": "I built a free JSON Parser that runs entirely in your browser (dark mode, tree view, no sign-up)",
+            "score": 0,
+            "comments": 6,
+            "url": "https://www.reddit.com/r/programming/comments/1ulwrii/i_built_a_free_json_parser_that_runs_entirely_in/"
+          },
+          {
+            "title": "Extralite 3.0.0 Released",
+            "score": 0,
+            "comments": 5,
+            "url": "https://www.reddit.com/r/programming/comments/1umc8nm/extralite_300_released/"
+          }
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/SideProject",
+        "subreddit": "r/SideProject",
+        "members": 768647,
+        "posts_in_window": 100,
+        "comments_in_window": 2,
+        "avg_comments": 0.0,
+        "active_threads_ge3": 0,
+        "heat_index": 203.8,
+        "top_pain_themes": [
+          "general (53)",
+          "tools/workflow (45)",
+          "cost/pricing (15)",
+          "time/friction (6)"
+        ],
+        "qualified": false,
+        "example_posts": [
+          {
+            "title": "🚨Sto sviluppando uno spreadsheet per valutare velocemente la profittabilità dei prodotti in Amazon FBA — feedback ben accetti 🚨",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/SideProject/comments/1uo6rgo/sto_sviluppando_uno_spreadsheet_per_valutare/"
+          },
+          {
+            "title": "Small update: the Google clicks didn't stop. Sitting at 15 now 🎉",
+            "score": 1,
+            "comments": 1,
+            "url": "https://www.reddit.com/r/SideProject/comments/1uo5he6/small_update_the_google_clicks_didnt_stop_sitting/"
+          },
+          {
+            "title": "Media tracker for movies, TV shows, and games - with more media types coming. I'd love your feedback.",
+            "score": 1,
+            "comments": 0,
+            "url": "https://www.reddit.com/r/SideProject/comments/1uo77xk/media_tracker_for_movies_tv_shows_and_games_with/"
+          },
+          {
+            "title": "My girlfriend and I spent 20 minutes every weekend arguing about what to eat. So I built an app to fix our relationship's biggest issue",
+            "score": 1,
+            "comments": 0,
+            "url": "https://www.reddit.com/r/SideProject/comments/1uo77t2/my_girlfriend_and_i_spent_20_minutes_every/"
+          },
+          {
+            "title": "I built a commercial-friendly uptime monitor after getting tired of bloated/expensive options",
+            "score": 1,
+            "comments": 0,
+            "url": "https://www.reddit.com/r/SideProject/comments/1uo75d7/i_built_a_commercialfriendly_uptime_monitor_after/"
+          }
+        ]
+      }
+    ]
+  },
+  "step_b": {
+    "posts_by_platform": {
+      "reddit": 4,
+      "hackernews": 0,
+      "v2ex": 3
+    },
+    "posts": [
+      {
+        "platform": "reddit",
+        "community": "r/programming",
+        "subreddit": "r/programming",
+        "id": "1um497y",
+        "title": "Linux has officially won",
+        "url": "https://www.reddit.com/r/programming/comments/1um497y/linux_has_officially_won/",
+        "score": 1444,
+        "comments": 345,
+        "selftext": "Actually it happened in June of 2025, but the process has completed recently, though. After Apple had announced the support of OCI-compatible containers in the June '25 it took a year to complete development and implement full support of continers. Apple had published 1.0 version of own container manager ([https://github.com/apple/container](https://github.com/apple/container)). And Microsoft had announced native support of containerization without Docker in Windows 11 ([https://devblogs.microsoft.com/commandline/wsl-container-is-now-available-for-public-preview/](https://devblogs.microsoft.com/commandline/wsl-container-is-now-available-for-public-preview/)). Now Linux is a part of any major platform: Windows, MacOS, BSD and Linux itself. Knowledge of Linux is now part of learning any of t",
+        "flair": null,
+        "posted": "2026-07-03T04:23:58+00:00",
+        "pain_themes": [
+          "tools/workflow",
+          "learning curve"
+        ],
+        "data_source": "browser/jina",
+        "browser_excerpt": "Title: URL Source: https://www.reddit.com/r/programming/comments/1um497y/linux_has_officially_won/ Warning: Target URL returned error 403: Forbidden Markdown Content: You've been blocked by network security. To continue, log in to your Reddit account or use your developer token If you think you've been blocked by mistake, file a ticket below and we'll look into it. [Log in](https://www.reddit.com/login/)[File a ticket](https://support.reddithelp.com/hc/en-us/requests/new?ticket_form_id=21879292693140)",
+        "top_comment_phrases": [
+          "",
+          "",
+          ""
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/Entrepreneur",
+        "subreddit": "r/Entrepreneur",
+        "id": "1ulo0x8",
+        "title": "How do you usually come up with real ideas?",
+        "url": "https://www.reddit.com/r/Entrepreneur/comments/1ulo0x8/how_do_you_usually_come_up_with_real_ideas/",
+        "score": 56,
+        "comments": 84,
+        "selftext": "Hey everyone! I'm into the entrepreneurship space for 4years now, was into a lot of businesses but after I read the Almanack of Naval Ravikant, my entire perspective changed and I realized I should build a long-term empire that runs without me in the future. I started to spend a lot of hours researching and brainstorming, I finally decided and validated my niche through my natural obsessions and specific knowledge, started talking and writing about it a lot. And now thinking about the code leverage to actually build an infrastructure every multi-million dollar company did. I'm curious how is it for you, were you thinking about stuff like that lately? And what are your techniques, or what did successful founders use in the past? Im geniunely curious about that because this is fundamental in",
+        "flair": "How Do I?",
+        "posted": "2026-07-02T17:03:54+00:00",
+        "pain_themes": [
+          "time/friction"
+        ],
+        "data_source": "arctic-shift",
+        "top_comment_phrases": [
+          "For me its pattern recognition and environment. If your in a particular field long enough, you will notice quickly when ",
+          "Most real ideas I've seen come from repeated exposure to a problem, not brainstorming sessions. The pattern is usually: ",
+          "I think people spend way too much time hunting for ideas and not enough time talking to actual customers. Conversations "
+        ]
+      },
+      {
+        "platform": "v2ex",
+        "community": "云计算",
+        "id": 1223525,
+        "title": "降本增效之运维费用大幅度缩减。",
+        "url": "https://www.v2ex.com/t/1223525",
+        "comments": 71,
+        "score": 71,
+        "member": "jonathan001",
+        "created": 1782693744,
+        "data_source": "v2ex.com/api",
+        "top_comment_phrases": [
+          "",
+          "",
+          ""
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/Entrepreneur",
+        "subreddit": "r/Entrepreneur",
+        "id": "1uldhpv",
+        "title": "Some clients just aren't worth it",
+        "url": "https://www.reddit.com/r/Entrepreneur/comments/1uldhpv/some_clients_just_arent_worth_it/",
+        "score": 47,
+        "comments": 81,
+        "selftext": "I've known this for a few months now, but I gotta tell this story just for anyone who doesn't know. Back in *February* (fucking *February!)* I had a client who reached out to me asking for me to run a promo for them. Sure. No problem. For context, I was going through chemo at this time. Constantly tired, no energy, etc. The break from work had given me lots of time to work on my business though, so I asked if he'd be willing to test it out since I think he'd be a good fit. Sure he says, to which I say great. I deliver his copy, and I also get to work on his AI caller. I sent an email asking for basic info (probably sent this email like 5 times in the span of 2-3 weeks). Eventually decided fuck it, guess that's that. Come mid-late April, he emails me out of the blue, asks if I'd be interest",
+        "flair": "Lessons Learned",
+        "posted": "2026-07-02T09:34:50+00:00",
+        "pain_themes": [
+          "general"
+        ],
+        "data_source": "arctic-shift",
+        "top_comment_phrases": [
+          "I initially used to take any and everyone. Recently I layed off 3 clients and made some base rules and if they doesn't f",
+          "Usually, what saves your from this is a contract (or some form of agreement) with all the terms and upfront 50% payment.",
+          "Nothing kills a business faster than clients who treat your time like it's free."
+        ]
+      },
+      {
+        "platform": "reddit",
+        "community": "r/startups",
+        "subreddit": "r/startups",
+        "id": "1umrh3k",
+        "title": "Startup founder, do you ever ask yourself this question? - i will not promote",
+        "url": "https://www.reddit.com/r/startups/comments/1umrh3k/startup_founder_do_you_ever_ask_yourself_this/",
+        "score": 42,
+        "comments": 19,
+        "selftext": "Founded a startup 8 months ago. Got traction, VC on board after 6 months, team is growing and to the outside world it all looks amazing. The truth is that I never felt this lonely, my salary hasn’t been this low since the past 7 years and I’m to impatient to wait on deals to close (5 months on average). I have no experience in the field I’m building which brings a lot of pressure and make me ask myself what are E actually building. Specially since the team is growing and I cannot work fulltime on product vision. I worked as a consultant before, made good money and didn’t realize how calm everything was despite having no purpose (worked for a big 4 consultancy). I’m not saying I regret but I did imagined it differently. Anyone else in this and how did you managed?",
+        "flair": "I will not promote",
+        "posted": "2026-07-03T22:01:56+00:00",
+        "pain_themes": [
+          "support/community"
+        ],
+        "data_source": "browser/jina",
+        "browser_excerpt": "Title: URL Source: https://www.reddit.com/r/startups/comments/1umrh3k/startup_founder_do_you_ever_ask_yourself_this/ Warning: Target URL returned error 403: Forbidden Markdown Content: You've been blocked by network security. To continue, log in to your Reddit account or use your developer token If you think you've been blocked by mistake, file a ticket below and we'll look into it. [Log in](https://www.reddit.com/login/)[File a ticket](https://support.reddithelp.com/hc/en-us/requests/new?ticket_form_id=21879292693140)",
+        "top_comment_phrases": [
+          "",
+          "",
+          ""
+        ]
+      },
+      {
+        "platform": "v2ex",
+        "community": "云计算",
+        "id": 1224174,
+        "title": "之前那个 mjj 的论坛没了， mjj 们都去哪里了",
+        "url": "https://www.v2ex.com/t/1224174",
+        "comments": 19,
+        "score": 19,
+        "member": "wcwcxiaobin",
+        "created": 1782878012,
+        "data_source": "v2ex.com/api",
+        "top_comment_phrases": [
+          "",
+          "",
+          ""
+        ]
+      },
+      {
+        "platform": "v2ex",
+        "community": "云计算",
+        "id": 1218654,
+        "title": "第一次遇到国内的阿里云服务器居然不能访问任意海外 ip 运营商直接把海外 ip 段拉黑",
+        "url": "https://www.v2ex.com/t/1218654",
+        "comments": 18,
+        "score": 18,
+        "member": "key001",
+        "created": 1780883286,
+        "data_source": "v2ex.com/api",
+        "top_comment_phrases": [
+          "",
+          "",
+          ""
+        ]
+      }
+    ],
+    "browser_fallback": null
+  },
+  "step_c_hint": "Agent: cluster pains → 5 micro-products → best pick → 10 hooks. Map each idea to ≥1 post.",
+  "total_posts": 7
+}
