@@ -1,6 +1,27 @@
 # Pain Miner
 
-**从社区热帖挖痛点，产出可卖的微型产品创意。**
+**Community pain-point mining CLI and AI-agent skill for finding micro-SaaS and indie product ideas.**
+
+从 Reddit、Hacker News、V2EX 等公开社区热帖里挖真实痛点，产出可卖的微型产品创意。
+
+```bash
+python3 scripts/pain_miner.py run \
+  --target "独立 SaaS 创业者" \
+  --hours 168 \
+  --fetch-comments \
+  --out result.json
+```
+
+Use it when you need evidence before building: who is complaining, where they complain, which posts got attention, and what small product could plausibly solve the pain.
+
+## Why Star This Repo
+
+- Turns community discussion into structured product-research evidence.
+- Default no-login workflow: Reddit archive/API paths, Hacker News, V2EX, and public-page fallback.
+- Works as a plain Python CLI or as an AI-agent skill.
+- Designed for indie hackers, micro-SaaS builders, product researchers, and content strategists.
+
+More AdvancingTitans agent tools: [`awesome-ai-agent-research-tools`](https://github.com/AdvancingTitans/awesome-ai-agent-research-tools).
 
 你只需描述目标用户（例如「独立 SaaS 创业者」「新手父母」「跨境卖家」），Pain Miner 会：
 
