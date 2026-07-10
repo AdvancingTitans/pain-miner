@@ -7,7 +7,7 @@
 | Reddit · Arctic Shift | ✅ 主源 | 免登录 | 帖文稳定；部分评论 422 |
 | Hacker News · Firebase/Algolia | ✅ 补充 | 免登录 | 官方 API |
 | V2EX · 公开 API | ✅ 补充 | 免登录 | 中文社区 |
-| 浏览器 · Jina Reader | ✅ 兜底 | 免登录 | `r.jina.ai/{url}` |
+| 浏览器 · Jina Reader | ✅ 兜底 | 免登录 | `r.jina.ai/{url}`；拦截页会标失败 |
 | 浏览器 · old.reddit.com | ✅ 兜底 | 免登录 | 公开帖/搜素页 |
 | pullpush.io | ⚠️ 末位 | 免登录 | 易 429，间隔 ≥4s |
 | OpenCLI / agent-reach Reddit | ⚠️ 可选 | **需登录** | 非默认；用户桌面已登录时用 |
@@ -38,7 +38,7 @@ GET https://arctic-shift.photon-reddit.com/api/comments/search?link_id=t3_{POST_
 | `permalink` | → `https://www.reddit.com{permalink}` |
 
 **限制**：无全局 sub 搜索 API → 社区发现靠 `plan-communities` 关键词推断 + Agent 修正 `--subs`。  
-422 → `limit=50`；请求间隔 ≥ 1.2s。
+422 → `limit=50`；请求间隔 ≥ 1.2s。若仍失败，记录 `source_events`，切换 HN-first，不得把失败伪装为社区无讨论。
 
 ### pullpush（末位兜底）
 
@@ -108,7 +108,7 @@ python3 scripts/pain_miner.py browser-read \
   --url "https://old.reddit.com/r/SaaS/comments/abc123/title_here/"
 ```
 
-底层：`GET https://r.jina.ai/{url}` — 将公开页转为可读 Markdown，**无需 API key**。
+底层：`GET https://r.jina.ai/{url}` — 将公开页转为可读 Markdown，**无需 API key**。`whoa there, pardner`、`network policy`、`Blocked` 等内容是拦截页，CLI 会返回 `ok: false`、`error_class: reddit_edge_block`。
 
 ### Agent 内置浏览器
 
@@ -141,7 +141,7 @@ JSON 中每条帖子必须有：
 }
 ```
 
-交付 Markdown 表头必须有 **平台** 列；Step C 创意映射需写明平台。
+最终报告的高价值证据表必须有 **平台/社区** 可追溯信息；候选方向必须指向目标相关的来源帖。
 
 ---
 

@@ -89,7 +89,7 @@ python3 scripts/pain_miner.py analyze-research --input result.json --out researc
 python3 scripts/pain_miner.py render-report --input result.json --out report.md
 ```
 
-`render-report` 输出研究范围、社区地图、高价值证据、三级痛点结构、跨社区共识与分歧、商业信号、候选机会、验证方案与证据附录；不会在缺少证据时捏造结论。AI 可以在此基础上再写创意文案，但必须保留来源帖和反证。
+`render-report` 是完整 Markdown 交付的唯一结构：研究范围、社区地图、高价值证据、三级痛点结构、跨社区共识与分歧、商业信号、候选机会、验证方案与证据附录。它不会在缺少证据时捏造结论；`INSUFFICIENT_EVIDENCE` 时机会卡为空，并列出下一步取证动作。AI 可以在此基础上再写创意文案，但必须保留来源帖和反证。
 
 ### 方式三：分步调试
 
@@ -156,26 +156,22 @@ python3 scripts/pain_miner.py run \
 **`render-report` 生成的报告结构（节选）：**
 
 ```markdown
-# 痛点挖掘报告：独立 SaaS 创业者
+# 痛点研究报告：独立 SaaS 创业者
 
-## Step A — 合格社区
-| 平台 | 社区 | 热门痛点主题 |
-| reddit | r/startups | 获客难、冷启动 |
-| reddit | r/Entrepreneur | 找合伙人、定价迷茫 |
+## 1. 研究范围
+- 研究判定：READY（主证据 7 / 最低 5）
+- 数据源：Reddit、Hacker News、V2EX；窗口、阈值和健康度均保留在报告内
 
-## Step B — 热帖取证
-| 平台 | 标题 | 赞 | 评 | 痛点原文 |
-| reddit | I built a SaaS but nobody uses it | 89 | 67 | 「花了 6 个月做产品，上线后零付费用户…」 |
+## 3. 高价值证据
+| 意图 | 社区 | 用户原话摘要 | 当前方案 | 想要结果 | 证据类型/风险 |
+| complaint | r/SaaS | [来源帖](url)：上线后没有付费用户 | 手工获客 | 稳定首批客户 | primary_evidence / unknown |
 
-## Step C — 创意交付
-### 五个小型数字产品
-1. **客户对话剧本本** — Notion 模板 + 15 张提问卡，¥49 起
-2. **冷启动检查清单** — 上线前 30 项自检
-…
+## 7. 候选产品方向
+### Help 独立 SaaS 创业者 address 获客
+- 支持证据、反证/边界、现有替代方案与未解决问题
 
-### 十个文案钩子
-- 痛点钩：「产品做完了，第一个付费用户在哪？」
-- 卖点钩：「15 个问题，摸清用户愿不愿意掏钱」
+## 9. 证据附录
+- 逐帖来源、数据限制和 `source_health`
 ```
 
 > 小社区（如 r/SaaS）在严格阈值下可能 0 条热帖，属正常现象。可放宽 `--min-score` / `--min-comments`，或手动指定 `--subs`。
@@ -243,22 +239,23 @@ python3 scripts/pain_miner.py run \
 | `--intent-query-expansion` | 关 | 使用按需求表达生成的额外 HN 查询 |
 | `--no-hn` / `--no-v2ex` | — | 跳过补充平台 |
 
-中文目标用户会自动启用 V2EX；英文目标以 Reddit + HN 为主。
+中文目标用户会自动启用 V2EX；包含 SaaS、indie 或独立开发线索的中文目标同时保留英文 Reddit + HN 路由，避免被泛职场节点主导。
 
 ---
 
 ## 输出 JSON 结构
 
-`run` 命令的 JSON 分三块，方便 AI 或你自己解析：
+`run` 命令的 JSON 记录采集过程和最终研究结构；最终 Markdown 必须通过 `render-report` 生成：
 
 ```json
 {
-  "schema_version": "2.2",
+  "schema_version": "2.3",
   "target": "独立 SaaS 创业者",
   "plan": { "reddit_subs": ["SaaS", "Entrepreneur"], "v2ex_nodes": ["create"] },
   "step_a": { "qualified_communities": [ /* 合格社区列表 */ ] },
   "step_b": { "posts": [ /* 热帖，每条含 platform / url / score / pain_themes / post_intent / commercial_signals / evidence_type */ ] },
   "analysis": { "pain_clusters": [], "community_comparisons": [], "opportunities": [] },
+  "source_health": { "arctic_shift": { "status": "ok" } },
   "total_posts": 7
 }
 ```
@@ -283,7 +280,7 @@ Twitter / LinkedIn / 小红书**不纳入**（需登录）。
 ## 常见问题
 
 **Q: 跑完热帖是 0 条？**  
-A: 阈值太严或该窗口内社区不活跃。试试 `--min-score 30 --min-comments 15 --hours 168`，或手动 `--subs` 换社区。
+A: 先运行 `python3 scripts/pain_miner.py diagnose`。`degraded` / `unavailable` 是当前网络或源的状态，不代表社区没有讨论。可扩到 `--hours 336`、适度降低阈值；Reddit 不可用而 HN 正常时会自动扩展 HN-first 查询。若 `run --analyze` 返回码为 2，请阅读报告的“证据不足：下一步”，不要强行生成产品结论。
 
 **Q: 评论是空的？**  
 A: Arctic Shift 部分帖子评论 API 会 422。加 `--fetch-comments` 后脚本会尝试 Jina 读公开页；仍缺失会标空，不会编造。

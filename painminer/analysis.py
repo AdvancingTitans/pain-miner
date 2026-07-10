@@ -13,7 +13,7 @@ import re
 from typing import Any
 from urllib.parse import urlsplit
 
-from painminer.research import parse_target
+from painminer.research import classify_target_relevance, parse_target
 
 
 DIRECT_INTENTS = {
@@ -281,26 +281,56 @@ def analyze_research(payload: dict[str, Any]) -> dict[str, Any]:
     """Produce P0/P1 research artifacts from a run or single-source JSON output."""
     step_b = payload.get("step_b") if isinstance(payload.get("step_b"), dict) else {}
     source_posts = step_b.get("posts") if isinstance(step_b.get("posts"), list) else payload.get("posts", [])
+    target = str(payload.get("target") or "")
     annotated, _unique_posts, duplicates = deduplicate_posts(source_posts if isinstance(source_posts, list) else [])
+    for post in annotated:
+        if not post.get("target_relevance"):
+            post.update(classify_target_relevance(post, target))
     attach_author_context(annotated)
     # Reuse the annotated canonical copies so author context and risk flags stay consistent.
     unique_annotated = [post for post in annotated if "duplicate_of" not in post]
-    clusters = _cluster_posts(unique_annotated)
+    research_posts = [post for post in unique_annotated if post.get("target_relevance") != "low"]
+    primary_posts = [post for post in research_posts if post.get("evidence_type") == "primary_evidence"]
+    quality_gate = payload.get("quality_gate") if isinstance(payload.get("quality_gate"), dict) else {}
+    min_primary = int(quality_gate.get("min_primary_evidence", 5))
+    verdict = "READY" if len(primary_posts) >= min_primary else "INSUFFICIENT_EVIDENCE"
+    clusters = _cluster_posts(research_posts)
+    comparisons = _community_comparisons(clusters)
+    next_actions = (
+        [] if verdict == "READY" else [
+            "Widen the time window or lower thresholds only with the resulting scope recorded.",
+            "Use a healthy source profile (for example HN-first when Reddit is blocked).",
+            "Review the target/community plan before treating low-relevance posts as evidence.",
+        ]
+    )
     return {
-        "schema_version": "2.2",
+        "schema_version": "2.3",
         "target": payload.get("target"),
-        "target_profile": parse_target(payload.get("target")),
+        "target_profile": parse_target(target),
         "deduplication": {
             "input_count": len(annotated), "unique_count": len(unique_annotated),
             "duplicate_count": len(duplicates), "duplicates": duplicates,
         },
         "posts": annotated,
+        "relevance_filter": {
+            "included_count": len(research_posts),
+            "excluded_low_relevance_count": len(unique_annotated) - len(research_posts),
+            "policy": "Low-relevance posts remain auditable but cannot support clusters or opportunities.",
+        },
+        "evidence_verdict": {
+            "status": verdict,
+            "primary_evidence_count": len(primary_posts),
+            "minimum_primary_evidence": min_primary,
+            "next_actions": next_actions,
+        },
         "pain_clusters": clusters,
-        "community_comparisons": _community_comparisons(clusters),
-        "opportunities": _opportunity_cards(clusters, str(payload.get("target") or "")),
+        "community_comparisons": comparisons,
+        "community_comparisons_status": "available" if comparisons else "not_applicable_or_insufficient_cross_community_evidence",
+        "opportunities": _opportunity_cards(clusters, target) if verdict == "READY" else [],
         "limitations": [
             "Signals are rule- and sample-based; they are not an aggregate opportunity score.",
             "Author context is limited to the current public sample; account age, karma, and private history are unknown.",
             "Product alternatives only include solutions explicitly observed in source posts.",
+            *( ["Insufficient primary, target-relevant evidence: opportunities are intentionally suppressed."] if verdict != "READY" else [] ),
         ],
     }

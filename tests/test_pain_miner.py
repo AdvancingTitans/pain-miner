@@ -32,6 +32,7 @@ class PainMinerTests(unittest.TestCase):
         self.assertEqual(parser.parse_args([
             "render-report", "--input", "result.json"
         ]).command, "render-report")
+        self.assertEqual(parser.parse_args(["diagnose"]).command, "diagnose")
 
     def test_intent_and_commercial_signals_are_explicit(self):
         post = pain_miner.enrich_post({
@@ -52,6 +53,26 @@ class PainMinerTests(unittest.TestCase):
         post = {"top_comment_phrases": ["Same here, I also use a spreadsheet.", "", ""]}
         pain_miner.annotate_comment_evidence(post)
         self.assertEqual(post["comment_evidence"][0]["evidence_type"], "supporting_evidence")
+
+    def test_chinese_saas_plan_is_bilingual_and_avoids_career_as_default(self):
+        plan = pain_miner.infer_communities("独立 SaaS 创业者")
+        self.assertEqual(plan["languages"], ["zh", "en"])
+        self.assertIn("indiehackers", plan["reddit_subs"])
+        self.assertNotIn("career", plan["v2ex_nodes"])
+
+    def test_browser_block_page_is_not_reported_as_success(self):
+        with patch.object(pain_miner, "http_get_text", return_value="whoa there, pardner — blocked by network policy"):
+            result = pain_miner.browser_read_url("https://old.reddit.com/r/SaaS")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_class"], "reddit_edge_block")
+
+    def test_diagnose_reports_each_public_source_without_conflating_blocked_jina(self):
+        with patch.object(pain_miner, "_probe_json_source", return_value={"status": "ok", "reason": "probe_ok"}), patch.object(
+            pain_miner, "browser_read_url", return_value={"ok": False, "error_class": "reddit_edge_block"}
+        ):
+            health = pain_miner.diagnose_sources()
+        self.assertEqual(health["arctic_shift"]["status"], "ok")
+        self.assertEqual(health["jina_old_reddit"], {"status": "unavailable", "reason": "reddit_edge_block"})
 
     def test_promotion_is_not_primary_evidence(self):
         post = pain_miner.enrich_post({"title": "I built a new feedback tool", "selftext": "Check out my app."})
@@ -98,10 +119,10 @@ class PainMinerTests(unittest.TestCase):
 
     def test_run_writes_structured_target_and_research_scope(self):
         args = pain_miner.build_parser().parse_args([
-            "run", "--target", "SaaS founders", "--subs", "SaaS", "--no-hn", "--no-v2ex", "--analyze",
+            "run", "--target", "SaaS founders", "--subs", "SaaS", "--no-hn", "--no-v2ex", "--analyze", "--min-primary-evidence", "1",
         ])
         args.browser_fallback = False
-        sample = {"platform": "reddit", "community": "r/SaaS", "id": "1", "title": "Manual workflow is hard",
+        sample = {"platform": "reddit", "community": "r/SaaS", "id": "1", "title": "SaaS founder manual workflow is hard",
                   "url": "https://example.test/1", "score": 2, "comments": 3, "pain_themes": ["tools/workflow"],
                   "post_intent": "complaint", "evidence_type": "primary_evidence", "commercial_signals": {}}
         with tempfile.NamedTemporaryFile(suffix=".json") as output, patch.object(

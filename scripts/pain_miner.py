@@ -30,7 +30,7 @@ if str(ROOT_DIR) not in sys.path:
 from painminer.analysis import analyze_research
 from painminer.models import CommunityProfile
 from painminer.report import render_report
-from painminer.research import parse_target
+from painminer.research import classify_target_relevance, parse_target
 
 ARCTIC_POSTS = "https://arctic-shift.photon-reddit.com/api/posts/search"
 ARCTIC_COMMENTS = "https://arctic-shift.photon-reddit.com/api/comments/search"
@@ -41,6 +41,12 @@ JINA_READER = "https://r.jina.ai/{url}"
 
 # Keyword → community hints (expandable; Agent may override via --subs/--hn-query/--v2ex-node)
 COMMUNITY_HINTS: list[dict[str, Any]] = [
+    {
+        "keywords": ["saas", "micro saas", "indie hacker", "bootstrap", "独立开发", "独立 saas", "独立saas"],
+        "reddit": ["SaaS", "indiehackers", "SideProject", "EntrepreneurRideAlong", "Entrepreneur", "startups"],
+        "hn": ["indie hacker", "micro saas", "bootstrap saas", "solo founder first customers"],
+        "v2ex": ["create", "share", "programmer"],
+    },
     {
         "keywords": ["finance", "invest", "理财", "投资", "股票", "基金", "fire", "退休", "负债", "budget"],
         "reddit": ["personalfinance", "Bogleheads", "investing", "financialindependence", "algotrading"],
@@ -54,10 +60,10 @@ COMMUNITY_HINTS: list[dict[str, Any]] = [
         "v2ex": ["life", "share"],
     },
     {
-        "keywords": ["developer", "programmer", "工程师", "程序员", "coding", "saas", "startup", "创业", "独立开发"],
+        "keywords": ["developer", "programmer", "工程师", "程序员", "coding"],
         "reddit": ["SaaS", "Entrepreneur", "startups", "webdev", "programming", "SideProject"],
         "hn": ["saas founder", "indie hacker", "developer tools"],
-        "v2ex": ["programmer", "create", "cloud", "career"],
+        "v2ex": ["programmer", "create", "cloud"],
     },
     {
         "keywords": ["game", "游戏", "gamedev", "indie game", "独立游戏", "steam", "unity", "godot"],
@@ -200,6 +206,10 @@ PROBLEM_STAGE_BY_INTENT = {
 }
 
 PULLPUSH = "https://api.pullpush.io/reddit/search/submission/"
+BLOCKED_PAGE_PATTERNS = (
+    "whoa there, pardner", "network policy", "access denied", "blocked by",
+    "reddit edge block", "temporarily blocked",
+)
 
 
 def utc_now() -> datetime:
@@ -407,7 +417,9 @@ def infer_communities(target: str) -> dict[str, Any]:
                 if n not in v2ex:
                     v2ex.append(n)
 
-    lang = "zh" if has_chinese(target) else "en"
+    target_profile = parse_target(target)
+    languages = target_profile["languages"]
+    lang = languages[0]
     if lang == "zh" and not v2ex:
         v2ex = ["create", "career", "programmer", "life"]
 
@@ -416,7 +428,7 @@ def infer_communities(target: str) -> dict[str, Any]:
         tokens = re.findall(r"[a-zA-Z]{4,}", target)
         reddit = tokens[:5] if tokens else ["Entrepreneur", "AskReddit"]
 
-    if not hn and lang == "en":
+    if not hn and "en" in languages:
         hn = [target[:80]]
 
     browser_urls = [
@@ -429,10 +441,13 @@ def infer_communities(target: str) -> dict[str, Any]:
     return {
         "target": target,
         "language": lang,
+        "languages": languages,
+        "relevance_lexicon": target_profile["relevance_lexicon"],
+        "confidence": "high" if matched else "low",
         "matched_keywords": list(dict.fromkeys(matched))[:6],
         "reddit_subs": reddit[:12],
         "hn_queries": hn[:3],
-        "intent_queries": intent_query_plan(target, lang),
+        "intent_queries": intent_query_plan(target, "en" if "en" in languages else lang),
         "v2ex_nodes": v2ex[:4],
         "browser_fallback_urls": browser_urls,
         "note": "Agent may override subs/queries; verify sub names exist before scan.",
@@ -475,11 +490,43 @@ def fetch_reddit_pullpush(sub: str, after: int, size: int = 50) -> list[dict]:
         return []
 
 
+def _source_error_status(error: Exception) -> tuple[str, str]:
+    """Turn transport failures into actionable source states, never a fake empty result."""
+    if isinstance(error, urllib.error.HTTPError):
+        if error.code == 403:
+            return "unavailable", "403_network_policy"
+        if error.code == 429:
+            return "rate_limited", "429_rate_limit"
+        if error.code == 422:
+            return "degraded", "422_invalid_or_unstable_query"
+        return "unavailable", f"http_{error.code}"
+    return "unavailable", type(error).__name__
+
+
+def _source_health(events: list[dict[str, Any]], source: str, post_count: int, *, enabled: bool = True) -> dict[str, str]:
+    if not enabled:
+        return {"status": "skipped", "reason": "disabled_by_cli"}
+    relevant = [event for event in events if event.get("source") == source]
+    failed = next((event for event in relevant if event.get("status") in {"unavailable", "rate_limited"}), None)
+    if failed:
+        return {"status": str(failed["status"]), "reason": str(failed.get("reason") or "request_failed")}
+    if post_count:
+        return {"status": "ok", "reason": f"{post_count}_qualified_posts"}
+    if relevant:
+        return {"status": "degraded", "reason": "no_qualified_posts_after_collection_or_thresholds"}
+    return {"status": "empty", "reason": "no_collection_attempt"}
+
+
 def browser_read_url(url: str, max_chars: int = 8000) -> dict[str, Any]:
     """Login-free page read via Jina Reader."""
     jina_url = JINA_READER.format(url=urllib.parse.quote(url, safe=""))
     try:
         text = http_get_text(jina_url)
+        if any(pattern in text.lower() for pattern in BLOCKED_PAGE_PATTERNS):
+            return {
+                "ok": False, "url": url, "via": "r.jina.ai", "text": text[:max_chars],
+                "error_class": "reddit_edge_block", "error": "Jina returned a known Reddit/network block page.",
+            }
         return {"ok": True, "url": url, "via": "r.jina.ai", "text": text[:max_chars]}
     except Exception as e:
         return {"ok": False, "url": url, "via": "r.jina.ai", "error": str(e)}
@@ -707,15 +754,24 @@ def discover_sub(sub: str, args: argparse.Namespace) -> dict | None:
     }
 
 
-def extract_from_sub(sub: str, args: argparse.Namespace, after: int) -> list[dict]:
+def extract_from_sub(
+    sub: str, args: argparse.Namespace, after: int, source_events: list[dict[str, Any]] | None = None,
+) -> list[dict]:
     hits: list[dict] = []
     try:
         posts = fetch_reddit_posts(sub, limit=args.limit)
+        if source_events is not None:
+            source_events.append({"source": "arctic_shift", "status": "ok", "subreddit": sub, "candidate_count": len(posts)})
     except Exception as e:
         print(f"err r/{sub} arctic: {e}", file=sys.stderr)
+        if source_events is not None:
+            status, reason = _source_error_status(e)
+            source_events.append({"source": "arctic_shift", "status": status, "reason": reason, "subreddit": sub})
         if args.use_pullpush:
             posts = fetch_reddit_pullpush(sub, after)
             print(f"fallback pullpush r/{sub}: {len(posts)} posts", file=sys.stderr)
+            if source_events is not None:
+                source_events.append({"source": "pullpush", "status": "ok" if posts else "empty", "subreddit": sub})
         else:
             return hits
 
@@ -770,7 +826,9 @@ def extract_from_sub(sub: str, args: argparse.Namespace, after: int) -> list[dic
     return hits
 
 
-def hn_search(query: str, args: argparse.Namespace, after: int) -> list[dict]:
+def hn_search(
+    query: str, args: argparse.Namespace, after: int, source_events: list[dict[str, Any]] | None = None,
+) -> list[dict]:
     params = urllib.parse.urlencode({
         "query": query,
         "tags": "story",
@@ -781,7 +839,12 @@ def hn_search(query: str, args: argparse.Namespace, after: int) -> list[dict]:
         data = http_get_json(f"{HN_ALGOLIA}?{params}")
     except Exception as e:
         print(f"err hn '{query}': {e}", file=sys.stderr)
+        if source_events is not None:
+            status, reason = _source_error_status(e)
+            source_events.append({"source": "hn_algolia", "status": status, "reason": reason, "query": query})
         return []
+    if source_events is not None:
+        source_events.append({"source": "hn_algolia", "status": "ok", "query": query, "candidate_count": len(data.get("hits", []))})
 
     hits_out: list[dict] = []
     for hit in data.get("hits", []):
@@ -814,7 +877,9 @@ def hn_search(query: str, args: argparse.Namespace, after: int) -> list[dict]:
     return hits_out
 
 
-def v2ex_fetch(node: str | None, args: argparse.Namespace) -> list[dict]:
+def v2ex_fetch(
+    node: str | None, args: argparse.Namespace, source_events: list[dict[str, Any]] | None = None,
+) -> list[dict]:
     try:
         if node:
             topics = http_get_json(
@@ -824,10 +889,15 @@ def v2ex_fetch(node: str | None, args: argparse.Namespace) -> list[dict]:
             topics = http_get_json(V2EX_HOT)
     except Exception as e:
         print(f"err v2ex {node or 'hot'}: {e}", file=sys.stderr)
+        if source_events is not None:
+            status, reason = _source_error_status(e)
+            source_events.append({"source": "v2ex", "status": status, "reason": reason, "node": node or "hot"})
         return []
 
     if not isinstance(topics, list):
         topics = []
+    if source_events is not None:
+        source_events.append({"source": "v2ex", "status": "ok", "node": node or "hot", "candidate_count": len(topics)})
 
     hits_out: list[dict] = []
     for t in topics[: args.limit]:
@@ -993,7 +1063,11 @@ def cmd_analyze_research(args: argparse.Namespace) -> int:
     with open(args.input, encoding="utf-8") as f:
         payload = json.load(f)
     result = analyze_research(payload)
-    _write_out({"command": "analyze-research", "as_of": utc_now().isoformat(), **result}, args.out)
+    output = {"command": "analyze-research", "as_of": utc_now().isoformat(), **result}
+    for key in ("research_scope", "window_hours", "filters", "source_health", "source_events", "quality_gate", "step_a", "plan"):
+        if key in payload:
+            output[key] = payload[key]
+    _write_out(output, args.out)
     return 0
 
 
@@ -1118,6 +1192,45 @@ def cmd_browser_read(args: argparse.Namespace) -> int:
     return 0
 
 
+def _probe_json_source(name: str, url: str) -> dict[str, str]:
+    try:
+        data = http_get_json(url, timeout=20)
+    except Exception as error:
+        status, reason = _source_error_status(error)
+        return {"status": status, "reason": reason}
+    is_empty = data in ({}, [], None) or (isinstance(data, dict) and data.get("data") == [])
+    return {"status": "empty" if is_empty else "ok", "reason": "probe_returned_no_records" if is_empty else "probe_ok"}
+
+
+def diagnose_sources() -> dict[str, dict[str, str]]:
+    """Probe each public route once so an agent can choose a viable collection plan."""
+    arctic_url = f"{ARCTIC_POSTS}?{urllib.parse.urlencode({'subreddit': 'SaaS', 'limit': 1, 'sort': 'desc'})}"
+    pullpush_url = f"{PULLPUSH}?{urllib.parse.urlencode({'subreddit': 'SaaS', 'size': 1, 'sort': 'desc'})}"
+    results = {
+        "arctic_shift": _probe_json_source("arctic_shift", arctic_url),
+        "reddit_public": _probe_json_source("reddit_public", "https://www.reddit.com/r/SaaS/top.json?t=week&limit=1"),
+        "pullpush": _probe_json_source("pullpush", pullpush_url),
+        "hn_algolia": _probe_json_source("hn_algolia", f"{HN_ALGOLIA}?query=indie%20hacker&hitsPerPage=1"),
+        "v2ex": _probe_json_source("v2ex", V2EX_HOT),
+    }
+    jina = browser_read_url("https://old.reddit.com/r/SaaS/top/?t=week", max_chars=500)
+    results["jina_old_reddit"] = {
+        "status": "ok" if jina.get("ok") else "unavailable",
+        "reason": "probe_ok" if jina.get("ok") else str(jina.get("error_class") or jina.get("error") or "request_failed"),
+    }
+    return results
+
+
+def cmd_diagnose(args: argparse.Namespace) -> int:
+    payload = {
+        "command": "diagnose", "schema_version": "2.3", "as_of": utc_now().isoformat(),
+        "source_health": diagnose_sources(),
+        "note": "Use HN-first collection when Reddit routes are unavailable or degraded; source health is an environment observation, not a community-demand conclusion.",
+    }
+    _write_out(payload, args.out)
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Full pipeline: plan → discover → extract → HN/V2EX → combined JSON for Agent Step C."""
     if args.subs:
@@ -1161,31 +1274,35 @@ def cmd_run(args: argparse.Namespace) -> int:
     ]
     extract_targets = [t.replace("r/", "") for t in extract_targets]
 
+    source_events: list[dict[str, Any]] = []
+
     # Step B: extract Reddit
     reddit_posts: list[dict] = []
     for i, sub in enumerate(extract_targets):
         if i:
             time.sleep(args.delay)
-        reddit_posts.extend(extract_from_sub(sub, args, after))
+        reddit_posts.extend(extract_from_sub(sub, args, after, source_events))
 
     # Step B: HN supplement (English / SaaS / dev targets)
     hn_posts: list[dict] = []
     if not args.no_hn and plan.get("hn_queries"):
         hn_queries = list(plan["hn_queries"][:2])
-        if args.intent_query_expansion:
+        # Reddit failures are an environment condition, not a reason to hand users an
+        # empty report.  Expand the existing, target-specific HN plan once instead.
+        if len(reddit_posts) < 3 or args.intent_query_expansion:
             hn_queries.extend(
                 queries[0] for queries in plan.get("intent_queries", {}).values() if queries
             )
         for q in list(dict.fromkeys(hn_queries))[:args.max_hn_queries]:
             time.sleep(args.delay)
-            hn_posts.extend(hn_search(q, args, after))
+            hn_posts.extend(hn_search(q, args, after, source_events))
 
     # Step B: V2EX supplement (Chinese targets)
     v2ex_posts: list[dict] = []
     if not args.no_v2ex and plan.get("v2ex_nodes"):
         for node in plan["v2ex_nodes"][:3]:
             time.sleep(args.delay)
-            v2ex_posts.extend(v2ex_fetch(node, args))
+            v2ex_posts.extend(v2ex_fetch(node, args, source_events))
 
     # Browser fallback if too few posts
     browser_notes: list[dict] = []
@@ -1195,19 +1312,36 @@ def cmd_run(args: argparse.Namespace) -> int:
             time.sleep(2)
             br = browser_read_url(url)
             browser_notes.append(br)
+            source_events.append({
+                "source": "jina_old_reddit", "status": "ok" if br.get("ok") else "unavailable",
+                "reason": br.get("error_class") or br.get("error"), "url": url,
+            })
             print(f"browser fallback: {url} ok={br.get('ok')}", file=sys.stderr)
 
-    all_posts = reddit_posts + hn_posts + v2ex_posts
-    all_posts.sort(key=lambda x: x.get("comments", 0) * 2 + x.get("score", 0), reverse=True)
-    research_analysis = analyze_research({"target": args.target, "step_b": {"posts": all_posts}}) if args.analyze else None
+    collected_posts = reddit_posts + hn_posts + v2ex_posts
+    for post in collected_posts:
+        post.update(classify_target_relevance(post, args.target))
+    collected_posts.sort(key=lambda x: x.get("comments", 0) * 2 + x.get("score", 0), reverse=True)
+    all_posts = [post for post in collected_posts if post.get("target_relevance") != "low"]
+    noise_posts = [post for post in collected_posts if post.get("target_relevance") == "low"]
+    source_health = {
+        "arctic_shift": _source_health(source_events, "arctic_shift", len(reddit_posts)),
+        "hn_algolia": _source_health(source_events, "hn_algolia", len(hn_posts), enabled=not args.no_hn),
+        "v2ex": _source_health(source_events, "v2ex", len(v2ex_posts), enabled=not args.no_v2ex),
+        "jina_old_reddit": _source_health(source_events, "jina_old_reddit", 0, enabled=bool(browser_notes)),
+    }
+    research_analysis = analyze_research({
+        "target": args.target, "step_b": {"posts": collected_posts},
+        "quality_gate": {"min_primary_evidence": args.min_primary_evidence},
+    }) if args.analyze else None
     if research_analysis:
         all_posts = research_analysis["posts"]
 
     captured_at = utc_now().isoformat()
     payload = {
         "command": "run",
-        "version": "2.2.0",
-        "schema_version": "2.2" if research_analysis else "2.1",
+        "version": "2.3.0",
+        "schema_version": "2.3" if research_analysis else "2.1",
         "as_of": captured_at,
         "target": args.target,
         "target_profile": parse_target(args.target),
@@ -1232,14 +1366,22 @@ def cmd_run(args: argparse.Namespace) -> int:
                 "v2ex": len(v2ex_posts),
             },
             "posts": all_posts,
+            "noise_posts": noise_posts,
             "browser_fallback": browser_notes if browser_notes else None,
         },
-        "step_c_hint": "Agent: separate supporting and counter evidence; cluster pains by task → obstacle; compare community differences before proposing opportunities.",
+        "source_events": source_events,
+        "source_health": source_health,
+        "quality_gate": {"min_primary_evidence": args.min_primary_evidence},
+        "step_c_hint": "Agent: use the nine-section report contract; low-relevance posts and insufficient evidence cannot support product opportunities.",
         "analysis": research_analysis,
         "total_posts": len(all_posts),
+        "total_collected_posts": len(collected_posts),
     }
     _write_out(payload, args.out)
-    return 0
+    verdict = research_analysis.get("evidence_verdict", {}).get("status") if research_analysis else "NOT_ANALYZED"
+    print(f"VERDICT: {verdict} | posts={len(all_posts)} relevant / {len(collected_posts)} collected | "
+          f"reddit={len(reddit_posts)} hn={len(hn_posts)} v2ex={len(v2ex_posts)}", file=sys.stderr)
+    return 2 if verdict == "INSUFFICIENT_EVIDENCE" else 0
 
 
 def _write_out(payload: dict, path: str | None) -> None:
@@ -1337,6 +1479,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Maximum HN queries when --intent-query-expansion is enabled")
     r.add_argument("--min-total-posts", type=int, default=5,
                    help="Trigger browser fallback if fewer posts found")
+    r.add_argument("--min-primary-evidence", type=int, default=5,
+                   help="Suppress opportunities and return exit code 2 below this many target-relevant primary posts")
     r.add_argument("--no-hn", action="store_true")
     r.add_argument("--no-v2ex", action="store_true")
     _add_common_scan_args(r)
@@ -1375,6 +1519,10 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--max-chars", type=int, default=8000)
     b.add_argument("--out", default=None)
     b.set_defaults(func=cmd_browser_read)
+
+    dg = sub.add_parser("diagnose", help="Probe public data-source health once before a research run")
+    dg.add_argument("--out", default=None)
+    dg.set_defaults(func=cmd_diagnose)
 
     return p
 

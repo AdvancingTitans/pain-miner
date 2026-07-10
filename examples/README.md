@@ -16,4 +16,4 @@ python3 scripts/pain_miner.py run \
 - 热帖总数：7（Reddit 4 + V2EX 3）
 - 合格社区：r/Entrepreneur, r/startups, r/webdev, r/programming
 
-把此文件交给 AI，提示「按 `references/output-templates.md` 生成 Step C 完整报告」即可复现演示效果。
+运行 `render-report --input examples/saas-founder-run.json --out report.md`，即可得到九节、来源可追溯的研究报告；不要再要求 Agent 生成旧式 Step A/B/C 报告。
