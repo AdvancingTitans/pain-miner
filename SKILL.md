@@ -22,9 +22,10 @@ description: >
 ## 默认工作流（用户只说目标用户时，直接跑全流程）
 
 ```text
-1. 解析目标用户 → plan-communities（或由 Agent 补充/修正社区列表）
-2. run 脚本 → 拿 JSON（A+B 结构化证据）
-3. Agent 读 JSON → 写 Step C + 按模板输出完整 Markdown
+1. 解析目标用户 → `plan-communities --profile-communities`（或由 Agent 补充/修正社区列表）
+2. `run --analyze` 脚本 → 拿 JSON（A+B 结构化证据，含意图、商业与风险标签）
+3. 读 `analysis` → 获取去重、痛点信号面板、跨社区对照与 OpportunityCard
+4. Agent 读 JSON → 分开支持证据/反证，写机会与最小验证方案
 ```
 
 **一键命令**：
@@ -34,6 +35,8 @@ description: >
 python3 scripts/pain_miner.py run \
   --target "独立游戏开发者" \
   --hours 72 --min-score 50 --min-comments 20 \
+  --profile-communities \
+  --analyze \
   --fetch-comments \
   --out /tmp/pain-miner-run.json
 ```
@@ -69,8 +72,10 @@ python3 scripts/pain_miner.py run \
 
 ```bash
 python3 scripts/pain_miner.py plan-communities \
-  --target "跨境独立站卖家" --out /tmp/pain-plan.json
+  --target "跨境独立站卖家" --profile-communities --out /tmp/pain-plan.json
 ```
+
+`--profile-communities` 只读取公开近期帖子和公开规则页，并缓存到 `.pain-miner-cache/communities/`。字段未知时必须保持 `unknown` / 空值，不能补写成事实。
 
 ---
 
@@ -78,7 +83,7 @@ python3 scripts/pain_miner.py plan-communities \
 
 ### 筛选条件（默认，用户可改）
 
-- Reddit：成员 ≥ **10,000**
+- Reddit：成员规模是分层信息，不是硬门槛（`large_broad` / `medium_vertical` / `small_expert`）
 - 窗口：**24–72h** 内有新帖
 - 活跃：72h 总评论 ≥ 30，或高互动帖(≥3评) ≥ 5
 - HN/V2EX：按各自阈值，**单独成表**，字段含 `platform`
@@ -92,6 +97,8 @@ heat = posts_72h × 2 + comments_72h ÷ 4 + score_72h ÷ 30 + active_threads_ge3
 ### Step A 交付字段
 
 每个社区一行：**平台 · 社区名 · 成员/活跃度 · 热门痛点主题 · 示例帖**。
+
+对候选社区同时说明四个独立判断，禁止合成为总分：`relevance`、`activity`、`research_fit`、`signal_quality`。小而精准的社区可因重复问题、评论深度和角色匹配而保留。
 
 ---
 
@@ -141,6 +148,16 @@ python3 scripts/pain_miner.py browser-read \
 | 想要什么 | 标题问句或 OP 明确目标 |
 | 热门评论短语 ×3 | 高赞评论；缺失标注「评论未返回」 |
 
+每条帖还含以下增量字段：
+
+- `post_intent`：`complaint` / `help_request` / `alternative_search` / `recommendation_request` / `workaround_share` / `switching_story` / `purchase_intent` / `promotion` / `meta_discussion` / `unknown`
+- `intent_confidence`、`classification_method: rule`、`classification_version`
+- `commercial_signals`：预算、显式/隐式付费意愿、当前方案、替代品搜索、切换原因、人工临时方案
+- `evidence_type`：`primary_evidence` / `context_evidence` / `counter_evidence` / `commercially_contaminated`
+- `risk_flags`：只标记可观测风险（如 `possible_self_promotion`、`missing_body`），**不判断用户真假或人格**。
+
+规则分类是弱信号，不确定时为 `unknown`。可以使用 `--intents complaint,alternative_search` 仅保留特定意图，但不得把筛选后的结果说成全量社区观点。
+
 ### 分步命令（调试 / 单平台）
 
 ```bash
@@ -148,34 +165,53 @@ python3 scripts/pain_miner.py discover \
   --subs SaaS,Entrepreneur,SideProject --hours 72 --out /tmp/a.json
 
 python3 scripts/pain_miner.py extract \
-  --subs SaaS,SideProject --fetch-comments --out /tmp/b.json
+  --subs SaaS,SideProject --intents complaint,alternative_search --fetch-comments --out /tmp/b.json
 
 python3 scripts/pain_miner.py hn-search \
   --query "indie saas" --hours 168 --min-score 30 --min-comments 15
 
 python3 scripts/pain_miner.py v2ex-hot --node create
+
+# 对已有 run/extract/HN/V2EX JSON 做跨社区对照（不会产生机会总分）
+python3 scripts/pain_miner.py compare-communities \
+  --input /tmp/pain-miner-run.json --topic "customer feedback management"
+
+# 对已有 run/extract/HN/V2EX JSON 生成完整研究结构
+python3 scripts/pain_miner.py analyze-research \
+  --input /tmp/pain-miner-run.json --out /tmp/pain-miner-analysis.json
+
+# 生成完整九节 Markdown 报告（保留来源、反证和数据限制）
+python3 scripts/pain_miner.py render-report \
+  --input /tmp/pain-miner-run.json --out /tmp/pain-miner-report.md
 ```
 
 ---
 
 ## Step C — 痛点聚类与创意（Agent，读 `run` JSON 后执行）
 
-### C1 聚类（6–8 簇，领域中立示例）
+### C1 聚类：从大词落到任务障碍
 
-- 工具摩擦 / 工作流断裂
-- 信息过载 / 不知如何选择
-- 成本焦虑 / 订阅疲劳
-- 学习曲线陡 / 无人带入门
-- 质量不信任 / 踩坑复盘
-- 孤独感 / 缺同行反馈
+使用三级结构，而不是仅输出「工具摩擦」等大词：
 
-每簇：**平台 · 代表帖链接 · 一句痛点原文**。
+```text
+痛点领域 → 任务场景 → 具体障碍
+```
 
-### C2 理想状态（5 条）
+每簇：**平台 · 社区 · 意图 · 代表帖链接 · 一句痛点原文 · 用户临时方案**。
+
+`analysis.pain_clusters` 提供 `frequency`、`cross_community`、`recency`、`workaround_cost`、`purchase_intent`、`existing_solution_dissatisfaction`、`evidence_quality` 信号面板和计数依据；不得将其压缩成一个总分。
+
+### C2 跨社区共识与反证
+
+- 先读 `compare-communities` 的 `shared_pains` 与 `community_differences`；局部社区文化不可表述为普遍需求。
+- 分开列出 `primary_evidence`、`counter_evidence` 和 `commercially_contaminated`；产品方向不能只依赖推广或观点帖。
+- 对证据不足的根因明确写「未知，待验证」，不得由模型填补。
+
+### C3 理想状态（5 条）
 
 用户语言描述「他们想变成什么样」。
 
-### C3 五个小型数字产品
+### C4 五个候选机会 + 最小验证
 
 | 项 | 要求 |
 |---|---|
@@ -184,11 +220,15 @@ python3 scripts/pain_miner.py v2ex-hot --node create
 | 承诺 | 可验证，不夸大 |
 | 映射痛点 | 标明簇名 + **平台来源帖** |
 
-### C4 最优方案 + 定价三档
+每个候选还必须写：支持证据、反证/边界、现有替代方案、未解问题，以及一项最低成本验证动作（目标用户、成功信号、放弃条件）。不输出单一「机会分」。
+
+优先复用 `analysis.opportunities` 的 `supporting_evidence`、`counter_evidence`、`existing_alternatives` 与 `recommended_validation`；它们是确定性初稿，Agent 只能在引用证据的前提下细化。
+
+### C5 最优方案 + 定价三档
 
 结合用户现有能力（上下文有技能/知识库则对齐）。
 
-### C5 十个文案钩子
+### C6 十个文案钩子
 
 - 5 痛点钩 + 5 卖点钩（可用 renhua 润色）
 
@@ -228,7 +268,10 @@ python3 scripts/pain_miner.py v2ex-hot --node create
 ## 质量门禁（交付前自检）
 
 - [ ] 一次响应含 Step A + B + C（除非用户只要某步）
+- [ ] 社区画像与四项独立判断已说明；小社区没有仅因成员数被删除
 - [ ] 每条证据有 **platform** 列/字段
+- [ ] 每条高价值证据写明意图、证据类型和可观测风险；未知字段未被推测
+- [ ] 跨社区共识、分歧与反证已分开；未使用不透明综合机会分
 - [ ] 链接可点击；赞评为取证快照，标注窗口与数据源
 - [ ] 5 创意均能指向具体帖（含平台）
 - [ ] 10 钩子：痛点 5 + 卖点 5

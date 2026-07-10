@@ -123,6 +123,10 @@ python3 scripts/pain_miner.py browser-read \
 
 `plan-communities` 输出 `browser_fallback_urls`，`run` 在热帖不足时自动尝试读取。
 
+### 社区画像的公开规则读取
+
+`profile-community --platform reddit --community <sub>` 与 `plan-communities --profile-communities` 会读取近期公开帖子，并可通过 Jina 读取公开规则页 `old.reddit.com/r/<sub>/about/rules/`。它只记录规则中可见的商业表达限制；读取失败时字段为 `unknown`，不降级为登录或 Cookie 抓取。
+
 ---
 
 ## 多平台数据合并规范

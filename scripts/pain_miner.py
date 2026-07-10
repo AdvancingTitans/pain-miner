@@ -20,7 +20,17 @@ import urllib.parse
 import urllib.request
 from collections import Counter
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from painminer.analysis import analyze_research
+from painminer.models import CommunityProfile
+from painminer.report import render_report
+from painminer.research import parse_target
 
 ARCTIC_POSTS = "https://arctic-shift.photon-reddit.com/api/posts/search"
 ARCTIC_COMMENTS = "https://arctic-shift.photon-reddit.com/api/comments/search"
@@ -109,6 +119,86 @@ GENERIC_PAIN_KEYWORDS = {
     "support/community": ["lonely", "no one", "advice", "help me", "求助", "没人"],
 }
 
+# These classifiers deliberately remain local and inspect only public post text.  They
+# are evidence labels, not claims about an author's identity or motives.
+INTENT_PATTERNS: dict[str, list[str]] = {
+    "promotion": [
+        r"\b(i|we) (built|made|launched|created)\b", r"\bcheck out (my|our)\b",
+        r"\b(use|try) my (app|tool|product)\b", r"\bdiscount code\b", r"我做了", r"我们做了", r"产品发布",
+    ],
+    "purchase_intent": [
+        r"\bwilling to pay\b", r"\bworth paying\b", r"\b(?:my )?budget\b",
+        r"\bunder \$?\d+\b", r"\bpaid for\b", r"愿意付费", r"预算", r"多少钱", r"值得付费",
+    ],
+    "alternative_search": [
+        r"\balternative to\b", r"\breplacement for\b", r"\banything like\b",
+        r"\blooking for an? alternative\b", r"替代品", r"有什么替代", r"替换.*工具",
+    ],
+    "recommendation_request": [
+        r"\b(?:can you )?recommend\b", r"\bwhat do you use\b", r"\blooking for (?:an? )?(?:tool|app|service)\b",
+        r"\bsuggestions?\b", r"求推荐", r"大家用什么", r"有什么好用",
+    ],
+    "switching_story": [
+        r"\bswitched from\b", r"\bmigrat(?:ed|ing) from\b", r"\bcancell?ed\b",
+        r"\bgave up (?:on|using)\b", r"\bstopped using\b", r"从.*换到", r"不再使用", r"取消订阅",
+    ],
+    "workaround_share": [
+        r"\bworkaround\b", r"\bcurrent setup\b", r"\bended up using\b",
+        r"\bcopy(?:ing)? (?:and )?paste\b", r"\bspreadsheet\b", r"临时方案", r"目前只能", r"手工", r"复制粘贴",
+    ],
+    "help_request": [
+        r"\bhelp(?: me)?\b", r"\bhow (?:do|can) i\b", r"\bany advice\b",
+        r"\bwhat should i do\b", r"求助", r"怎么办", r"请教", r"如何(?:做|解决)",
+    ],
+    "complaint": [
+        r"\bhate\b", r"\bfrustrat\w*\b", r"\bannoying\b", r"\bstruggl\w*\b",
+        r"\b(?:too |so )?(?:hard|difficult|broken|slow)\b", r"\bdoesn'?t work\b",
+        r"太难", r"很烦", r"痛苦", r"不好用", r"失效", r"崩溃",
+    ],
+    "meta_discussion": [
+        r"\bunpopular opinion\b", r"\bhot take\b", r"\bthe industry\b", r"\bthis community\b",
+        r"行业.*讨论", r"社区.*讨论", r"大家怎么看",
+    ],
+}
+
+INTENT_ORDER = [
+    "promotion", "purchase_intent", "alternative_search", "recommendation_request",
+    "switching_story", "workaround_share", "help_request", "complaint", "meta_discussion",
+]
+
+CURRENT_SOLUTION_PATTERNS = [
+    r"(?:using|use|current setup is|currently on)\s+([A-Za-z0-9][A-Za-z0-9 .+/_-]{1,50})",
+    r"(?:正在使用|目前用|现在用)\s*([^，。！？\n]{2,40})",
+]
+SWITCHING_TRIGGER_PATTERNS = [
+    r"(?:because|due to)\s+([^.!?\n]{3,100})",
+    r"(?:因为|由于)\s*([^，。！？\n]{3,60})",
+]
+DESIRED_OUTCOME_PATTERNS = [
+    r"\b(?:looking for|need|want|wish)\s+(?:an?\s+)?([^.!?\n]{3,120})",
+    r"(?:想要|需要|希望)\s*([^，。！？\n]{3,80})",
+]
+FAILED_ATTEMPT_PATTERNS = [
+    r"\b(?:tried|attempted|already tried)\s+([^.!?\n]{3,120})",
+    r"(?:试过|尝试过)\s*([^，。！？\n]{3,80})",
+]
+
+ROLE_KEYWORDS: dict[str, list[str]] = {
+    "founder": ["founder", "startup", "saas", "创业", "创始人"],
+    "developer": ["developer", "programmer", "coding", "api", "开发", "程序员"],
+    "marketer": ["marketing", "growth", "seo", "广告", "营销", "增长"],
+    "product_manager": ["product manager", "roadmap", "用户反馈", "产品经理"],
+    "consumer": ["parent", "fitness", "travel", "个人", "用户"],
+}
+
+PROBLEM_STAGE_BY_INTENT = {
+    "complaint": "problem_report", "help_request": "problem_report",
+    "alternative_search": "solution_search", "recommendation_request": "solution_search",
+    "purchase_intent": "solution_search", "switching_story": "solution_switching",
+    "workaround_share": "workaround", "promotion": "solution_promotion",
+    "meta_discussion": "context_discussion",
+}
+
 PULLPUSH = "https://api.pullpush.io/reddit/search/submission/"
 
 
@@ -147,8 +237,154 @@ def tag_pain_themes(title: str, body: str = "", extra_keywords: dict[str, list[s
     return hits or ["general"]
 
 
+def _matches(text: str, patterns: list[str]) -> int:
+    return sum(1 for pattern in patterns if re.search(pattern, text, flags=re.IGNORECASE))
+
+
+def classify_post_intent(title: str, body: str = "") -> dict[str, Any]:
+    """Return a transparent, rule-based intent label for public post text."""
+    text = f"{title}\n{body}".strip()
+    if not text:
+        return {
+            "post_intent": "unknown", "intent_confidence": 0.0,
+            "classification_method": "rule", "classification_version": "intent-v1",
+        }
+
+    for intent in INTENT_ORDER:
+        matches = _matches(text, INTENT_PATTERNS[intent])
+        if matches:
+            return {
+                "post_intent": intent,
+                "intent_confidence": round(min(0.95, 0.62 + matches * 0.14), 2),
+                "classification_method": "rule",
+                "classification_version": "intent-v1",
+            }
+    return {
+        "post_intent": "unknown", "intent_confidence": 0.0,
+        "classification_method": "rule", "classification_version": "intent-v1",
+    }
+
+
+def _first_capture(text: str, patterns: list[str]) -> str | None:
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return clean_text(match.group(1), 120) or None
+    return None
+
+
+def _all_captures(text: str, patterns: list[str]) -> list[str]:
+    captures = []
+    for pattern in patterns:
+        captures.extend(clean_text(match, 120) for match in re.findall(pattern, text, flags=re.IGNORECASE))
+    return list(dict.fromkeys(capture for capture in captures if capture))[:5]
+
+
+def extract_commercial_signals(title: str, body: str, intent: str) -> dict[str, Any]:
+    """Extract observable solution-search signals; unknown stays unknown."""
+    text = f"{title}\n{body}".strip()
+    budget = bool(re.search(r"\b(?:budget|under \$?\d+|\$\d+)\b|预算|多少钱", text, re.IGNORECASE))
+    explicit_wtp = bool(re.search(r"\bwilling to pay\b|\bworth paying\b|愿意付费|值得付费", text, re.IGNORECASE))
+    implicit_wtp = intent in {"purchase_intent", "alternative_search", "recommendation_request"}
+    return {
+        "budget_mentioned": budget,
+        "willingness_to_pay": "explicit" if explicit_wtp else ("implicit" if implicit_wtp else "unknown"),
+        "current_solution": _first_capture(text, CURRENT_SOLUTION_PATTERNS),
+        "alternative_sought": bool(_matches(text, INTENT_PATTERNS["alternative_search"])),
+        "switching_trigger": _first_capture(text, SWITCHING_TRIGGER_PATTERNS)
+        if intent == "switching_story" else None,
+        "workaround_present": intent == "workaround_share" or bool(re.search(
+            r"\b(?:manual|spreadsheet|copy(?:ing)? (?:and )?paste)\b|手工|临时方案|复制粘贴", text, re.IGNORECASE
+        )),
+    }
+
+
+def evidence_labels(title: str, body: str, intent: str) -> tuple[str, list[str]]:
+    """Classify evidence provenance without judging people or hidden account history."""
+    text = f"{title}\n{body}".strip()
+    flags: list[str] = []
+    if intent == "promotion":
+        flags.append("possible_self_promotion")
+    if not body:
+        flags.append("missing_body")
+    if len(text) < 40:
+        flags.append("low_context")
+    if re.search(r"\b(?:works fine|no problem with|already solved|don't need)\b|没问题|不需要", text, re.IGNORECASE):
+        return "counter_evidence", flags
+    if intent == "promotion":
+        return "commercially_contaminated", flags
+    if intent in {"complaint", "help_request", "alternative_search", "recommendation_request", "workaround_share", "switching_story", "purchase_intent"}:
+        return "primary_evidence", flags
+    return "context_evidence", flags
+
+
+def enrich_post(post: dict[str, Any], body_fields: tuple[str, ...] = ("selftext", "story_text", "title")) -> dict[str, Any]:
+    """Add backward-compatible research fields to a normalized post record."""
+    title = str(post.get("title") or "")
+    body = ""
+    for field in body_fields:
+        if field != "title" and post.get(field):
+            body = str(post[field])
+            break
+    intent = classify_post_intent(title, body)
+    evidence_type, risk_flags = evidence_labels(title, body, intent["post_intent"])
+    post.update(intent)
+    post["problem_stage"] = PROBLEM_STAGE_BY_INTENT.get(intent["post_intent"], "unknown")
+    post["commercial_signals"] = extract_commercial_signals(title, body, intent["post_intent"])
+    post["evidence_type"] = evidence_type
+    post["risk_flags"] = risk_flags
+    post["pain_statement"] = clean_text(body or title, 280) or None
+    post["desired_outcome"] = _first_capture(f"{title}\n{body}", DESIRED_OUTCOME_PATTERNS)
+    post["failed_attempts"] = _all_captures(f"{title}\n{body}", FAILED_ATTEMPT_PATTERNS)
+    post["source_snapshot"] = {
+        "url": post.get("url"), "data_source": post.get("data_source"), "captured_at": utc_now().isoformat(),
+    }
+    post.setdefault("pain_themes", tag_pain_themes(title, body))
+    return post
+
+
+def annotate_comment_evidence(post: dict[str, Any]) -> None:
+    """Label only observable confirmation in fetched public top-comment snippets."""
+    evidence = []
+    for phrase in post.get("top_comment_phrases", []):
+        if not phrase:
+            continue
+        kind = "supporting_evidence" if re.search(
+            r"\b(?:same here|me too|i also|also have|this is exactly)\b|同感|我也是|也遇到", phrase, re.IGNORECASE
+        ) else "comment_context"
+        evidence.append({"text": phrase, "evidence_type": kind})
+    post["comment_evidence"] = evidence
+
+
+def post_matches_intents(post: dict[str, Any], intents: str | None) -> bool:
+    if not intents:
+        return True
+    allowed = {intent.strip() for intent in intents.split(",") if intent.strip()}
+    return post.get("post_intent") in allowed
+
+
 def post_score(post: dict) -> int:
     return max(int(post.get("score") or 0), int(post.get("ups") or 0))
+
+
+def intent_query_plan(target: str, language: str) -> dict[str, list[str]]:
+    """Keep intent query expansion explicit so callers can opt into extra requests."""
+    base = target[:80].strip()
+    if language == "zh":
+        return {
+            "complaint": [f"{base} 很难", f"{base} 痛点"],
+            "recommendation_request": [f"{base} 求推荐"],
+            "alternative_search": [f"{base} 替代品"],
+            "switching_story": [f"{base} 不再使用"],
+            "purchase_intent": [f"{base} 愿意付费", f"{base} 预算"],
+        }
+    return {
+        "complaint": [f"{base} frustrating", f"{base} struggle"],
+        "recommendation_request": [f"{base} what do you use"],
+        "alternative_search": [f"{base} alternative"],
+        "switching_story": [f"{base} switched from"],
+        "purchase_intent": [f"{base} worth paying", f"{base} budget"],
+    }
 
 
 def infer_communities(target: str) -> dict[str, Any]:
@@ -196,6 +432,7 @@ def infer_communities(target: str) -> dict[str, Any]:
         "matched_keywords": list(dict.fromkeys(matched))[:6],
         "reddit_subs": reddit[:12],
         "hn_queries": hn[:3],
+        "intent_queries": intent_query_plan(target, lang),
         "v2ex_nodes": v2ex[:4],
         "browser_fallback_urls": browser_urls,
         "note": "Agent may override subs/queries; verify sub names exist before scan.",
@@ -261,6 +498,160 @@ def heat_index(posts_72h: int, comments_72h: int, score_72h: int, active_ge3: in
     return round(posts_72h * 2 + comments_72h / 4 + score_72h / 30 + active_ge3 * 3, 1)
 
 
+def _member_tier(members: int) -> str:
+    if members >= 100_000:
+        return "large_broad"
+    if members >= 10_000:
+        return "medium_vertical"
+    return "small_expert"
+
+
+def _rule_summary(sub: str, fetch_rules: bool) -> tuple[dict[str, str], str, list[str]]:
+    if not fetch_rules:
+        return {}, "unknown", []
+    result = browser_read_url(f"https://old.reddit.com/r/{sub}/about/rules/", max_chars=12000)
+    if not result.get("ok"):
+        return {}, "unknown", ["rules_unavailable"]
+    text = str(result.get("text") or "")
+    lower = text.lower()
+    summary: dict[str, str] = {}
+    for key, words in {
+        "self_promotion": ["self-promotion", "self promotion", "promotion"],
+        "surveys": ["survey", "questionnaire"],
+        "product_links": ["product link", "affiliate", "referral"],
+        "ai_content": ["ai-generated", "ai generated"],
+    }.items():
+        if any(word in lower for word in words):
+            summary[key] = "mentioned_in_public_rules"
+    if not summary.get("self_promotion"):
+        return summary, "unknown", []
+    if "weekly" in lower or "megathread" in lower:
+        return summary, "weekly_thread_only", []
+    if any(word in lower for word in ["prohibit", "not allowed", "not permit", "banned"]):
+        return summary, "restricted", []
+    return summary, "context_required", []
+
+
+def _profile_roles(posts: list[dict[str, Any]]) -> list[str]:
+    sample = " ".join(f"{p.get('title', '')} {p.get('selftext', '')}" for p in posts).lower()
+    roles = [role for role, words in ROLE_KEYWORDS.items() if any(word.lower() in sample for word in words)]
+    return roles[:4]
+
+
+def build_community_profile(sub: str, limit: int = 30, fetch_rules: bool = True) -> dict[str, Any]:
+    """Profile a public Reddit community from a recent sample and public rules page."""
+    posts = fetch_reddit_posts(sub, limit=limit)
+    members = int(posts[0].get("subreddit_subscribers") or 0) if posts else None
+    enriched = [enrich_post({
+        "title": p.get("title", ""), "selftext": clean_text(p.get("selftext", ""), 800),
+    }) for p in posts]
+    intent_counts = Counter(p["post_intent"] for p in enriched)
+    direct_intents = {"complaint", "help_request", "alternative_search", "recommendation_request", "workaround_share", "switching_story", "purchase_intent"}
+    styles = []
+    for label, intents in {
+        "help_seeking": {"help_request", "recommendation_request"},
+        "solution_search": {"alternative_search", "purchase_intent", "switching_story"},
+        "build_in_public": {"promotion"},
+        "workaround_sharing": {"workaround_share"},
+    }.items():
+        if any(intent_counts[intent] for intent in intents):
+            styles.append(label)
+    strengths = []
+    if any(intent_counts[i] for i in direct_intents):
+        strengths.append("problem_discovery")
+    if any(intent_counts[i] for i in {"alternative_search", "recommendation_request", "purchase_intent", "switching_story"}):
+        strengths.append("purchase_validation")
+    if intent_counts["promotion"]:
+        strengths.append("solution_feedback")
+    risks = []
+    if intent_counts["promotion"]:
+        risks.append("self_promotion")
+    if len(posts) < 5:
+        risks.append("small_recent_sample")
+    rules_summary, commercial_policy, rule_flags = _rule_summary(sub, fetch_rules)
+    profile = CommunityProfile(
+        platform="reddit",
+        community=f"r/{sub}",
+        title=None,
+        description=None,
+        members=members,
+        audience_roles=_profile_roles(posts),
+        common_post_types=[name for name, _ in intent_counts.most_common(5) if name != "unknown"],
+        discussion_style=styles,
+        rules_summary=rules_summary,
+        commercial_content_policy=commercial_policy,
+        research_strengths=strengths,
+        bias_risks=risks,
+        activity_metrics={
+            "sample_posts": len(posts),
+            "sample_comments": sum(int(p.get("num_comments") or 0) for p in posts),
+            "direct_evidence_ratio": round(
+                sum(1 for p in enriched if p["post_intent"] in direct_intents) / len(enriched), 2
+            ) if enriched else 0.0,
+        },
+        profile_fetched_at=utc_now().isoformat(),
+        source_urls=[f"{ARCTIC_POSTS}?subreddit={urllib.parse.quote(sub)}"] + (
+            [f"https://old.reddit.com/r/{sub}/about/rules/"] if fetch_rules else []
+        ),
+    )
+    return {
+        **profile.to_dict(),
+        "member_tier": _member_tier(members) if members is not None else "unknown",
+        "risk_flags": rule_flags,
+        "classification_method": "public_sample+rule",
+        "classification_version": "community-profile-v1",
+    }
+
+
+def assess_community(profile: dict[str, Any], target: str) -> dict[str, str]:
+    """Expose separate research judgments; intentionally do not calculate a composite score."""
+    target_terms = set(re.findall(r"[a-zA-Z]{4,}", target.lower()))
+    target_roles = {
+        role for role, words in ROLE_KEYWORDS.items()
+        if any(word.lower() in target.lower() for word in words)
+    }
+    sample_text = " ".join(profile.get("audience_roles", []) + profile.get("common_post_types", [])).lower()
+    relevance = "high" if target_roles & set(profile.get("audience_roles", [])) else (
+        "medium" if target_terms and any(term in sample_text for term in target_terms) else "unknown"
+    )
+    sample_posts = int(profile.get("activity_metrics", {}).get("sample_posts") or 0)
+    activity = "high" if sample_posts >= 20 else ("medium" if sample_posts >= 5 else "low")
+    research_fit = "high" if profile.get("research_strengths") else "unknown"
+    ratio = float(profile.get("activity_metrics", {}).get("direct_evidence_ratio") or 0)
+    signal_quality = "high" if ratio >= 0.5 else ("medium" if ratio > 0 else "unknown")
+    return {
+        "relevance": relevance,
+        "activity": activity,
+        "research_fit": research_fit,
+        "signal_quality": signal_quality,
+    }
+
+
+def _profile_cache_path(cache_dir: str, sub: str) -> Path:
+    safe_sub = re.sub(r"[^a-zA-Z0-9_-]", "_", sub.lower())
+    return Path(cache_dir) / f"reddit-{safe_sub}.json"
+
+
+def load_or_build_community_profile(
+    sub: str, *, limit: int, fetch_rules: bool, cache_dir: str, refresh: bool,
+) -> tuple[dict[str, Any], bool]:
+    """Cache public profile snapshots locally; a cache miss never changes research logic."""
+    cache_path = _profile_cache_path(cache_dir, sub)
+    if not refresh:
+        try:
+            with cache_path.open(encoding="utf-8") as f:
+                cached = json.load(f)
+            if cached.get("cache_version") == "community-profile-v1":
+                return cached["profile"], True
+        except (OSError, json.JSONDecodeError, KeyError):
+            pass
+    profile = build_community_profile(sub, limit=limit, fetch_rules=fetch_rules)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    with cache_path.open("w", encoding="utf-8") as f:
+        json.dump({"cache_version": "community-profile-v1", "profile": profile}, f, ensure_ascii=False, indent=2)
+    return profile, False
+
+
 def discover_sub(sub: str, args: argparse.Namespace) -> dict | None:
     after = int(utc_now().timestamp() - args.hours * 3600)
     posts = fetch_reddit_posts(sub, limit=args.limit)
@@ -269,9 +660,6 @@ def discover_sub(sub: str, args: argparse.Namespace) -> dict | None:
         return None
 
     members = int(recent[0].get("subreddit_subscribers") or 0)
-    if members < args.min_members:
-        return None
-
     comments = sum(int(p.get("num_comments") or 0) for p in recent)
     scores = sum(post_score(p) for p in recent)
     active = sum(1 for p in recent if int(p.get("num_comments") or 0) >= 3)
@@ -298,6 +686,8 @@ def discover_sub(sub: str, args: argparse.Namespace) -> dict | None:
         "community": f"r/{sub}",
         "subreddit": f"r/{sub}",
         "members": members,
+        "member_tier": _member_tier(members),
+        "member_threshold_met": members >= args.min_members,
         "posts_in_window": len(recent),
         "comments_in_window": comments,
         "avg_comments": round(avg_c, 1),
@@ -343,6 +733,7 @@ def extract_from_sub(sub: str, args: argparse.Namespace, after: int) -> list[dic
             "community": f"r/{sub}",
             "subreddit": f"r/{sub}",
             "id": p.get("id"),
+            "author": p.get("author"),
             "title": p.get("title", ""),
             "url": f"https://www.reddit.com{p.get('permalink', '')}",
             "score": score,
@@ -355,6 +746,10 @@ def extract_from_sub(sub: str, args: argparse.Namespace, after: int) -> list[dic
             "pain_themes": tag_pain_themes(p.get("title", ""), body),
             "data_source": "arctic-shift",
         }
+
+        enrich_post(item)
+        if not post_matches_intents(item, args.intents):
+            continue
 
         if args.fetch_comments:
             time.sleep(args.delay)
@@ -370,6 +765,7 @@ def extract_from_sub(sub: str, args: argparse.Namespace, after: int) -> list[dic
         else:
             item["top_comment_phrases"] = ["", "", ""]
 
+        annotate_comment_evidence(item)
         hits.append(item)
     return hits
 
@@ -394,10 +790,11 @@ def hn_search(query: str, args: argparse.Namespace, after: int) -> list[dict]:
         if score < args.min_score or comments < args.min_comments:
             continue
         object_id = hit.get("objectID", "")
-        hits_out.append({
+        item = {
             "platform": "hackernews",
             "community": "Hacker News",
             "id": object_id,
+            "author": hit.get("author"),
             "title": hit.get("title", ""),
             "url": hit.get("url") or f"https://news.ycombinator.com/item?id={object_id}",
             "score": score,
@@ -409,7 +806,11 @@ def hn_search(query: str, args: argparse.Namespace, after: int) -> list[dict]:
             "hn_discussion": f"https://news.ycombinator.com/item?id={object_id}",
             "data_source": "hn.algolia.com",
             "top_comment_phrases": ["", "", ""],
-        })
+        }
+        item = enrich_post(item)
+        annotate_comment_evidence(item)
+        if post_matches_intents(item, args.intents):
+            hits_out.append(item)
     return hits_out
 
 
@@ -434,10 +835,11 @@ def v2ex_fetch(node: str | None, args: argparse.Namespace) -> list[dict]:
         if replies < args.min_comments:
             continue
         node_title = t.get("node", {}).get("title") if isinstance(t.get("node"), dict) else node
-        hits_out.append({
+        item = {
             "platform": "v2ex",
             "community": node_title or node or "hot",
             "id": t.get("id"),
+            "author": t.get("member", {}).get("username") if isinstance(t.get("member"), dict) else None,
             "title": t.get("title", ""),
             "url": f"https://www.v2ex.com/t/{t.get('id')}",
             "comments": replies,
@@ -446,7 +848,11 @@ def v2ex_fetch(node: str | None, args: argparse.Namespace) -> list[dict]:
             "created": t.get("created"),
             "data_source": "v2ex.com/api",
             "top_comment_phrases": ["", "", ""],
-        })
+        }
+        item = enrich_post(item)
+        annotate_comment_evidence(item)
+        if post_matches_intents(item, args.intents):
+            hits_out.append(item)
     return hits_out
 
 
@@ -466,8 +872,141 @@ def cmd_plan(args: argparse.Namespace) -> int:
     if args.v2ex_node:
         plan["v2ex_nodes"] = [n.strip() for n in args.v2ex_node.split(",") if n.strip()]
 
-    payload = {"command": "plan-communities", "as_of": utc_now().isoformat(), "plan": plan}
+    if args.profile_communities:
+        plan["community_profiles"] = profile_plan_communities(plan, args.target, args)
+
+    payload = {"command": "plan-communities", "schema_version": "2.1", "as_of": utc_now().isoformat(), "plan": plan}
     _write_out(payload, args.out)
+    return 0
+
+
+def profile_plan_communities(plan: dict[str, Any], target: str, args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Attach cached public profiles to a plan without changing its candidate list."""
+    profiles = []
+    for index, sub in enumerate(plan.get("reddit_subs", [])):
+        if index:
+            time.sleep(args.delay)
+        try:
+            profile, cache_hit = load_or_build_community_profile(
+                sub, limit=args.profile_limit, fetch_rules=not args.no_rules,
+                cache_dir=args.cache_dir, refresh=args.refresh_profiles,
+            )
+            profile["research_assessment"] = assess_community(profile, target)
+            profile["cache_hit"] = cache_hit
+            profiles.append(profile)
+        except Exception as e:
+            profiles.append({
+                "platform": "reddit", "community": f"r/{sub}", "error": str(e),
+                "research_assessment": {
+                    "relevance": "unknown", "activity": "unknown",
+                    "research_fit": "unknown", "signal_quality": "unknown",
+                },
+            })
+    return profiles
+
+
+def cmd_profile_community(args: argparse.Namespace) -> int:
+    args.community = args.community.removeprefix("r/")
+    profile, cache_hit = load_or_build_community_profile(
+        args.community, limit=args.limit, fetch_rules=not args.no_rules,
+        cache_dir=args.cache_dir, refresh=args.refresh,
+    )
+    profile["cache_hit"] = cache_hit
+    payload = {
+        "command": "profile-community", "schema_version": "2.1",
+        "as_of": utc_now().isoformat(), "profile": profile,
+    }
+    _write_out(payload, args.out)
+    return 0
+
+
+def _input_posts(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    step_b = payload.get("step_b")
+    if isinstance(step_b, dict) and isinstance(step_b.get("posts"), list):
+        return step_b["posts"]
+    return payload.get("posts", []) if isinstance(payload.get("posts"), list) else []
+
+
+def _topic_matches(post: dict[str, Any], topic: str) -> bool:
+    text = " ".join(str(post.get(field) or "") for field in ("title", "selftext", "story_text")).lower()
+    normalized = topic.lower().strip()
+    if normalized in text:
+        return True
+    english_terms = [term for term in re.findall(r"[a-zA-Z]{3,}", normalized) if term not in {"the", "and", "for", "with"}]
+    return bool(english_terms) and all(term in text for term in english_terms)
+
+
+def compare_communities(payload: dict[str, Any], topic: str) -> dict[str, Any]:
+    """Describe observable agreements and differences without converting them to one score."""
+    matches = [enrich_post(dict(post)) for post in _input_posts(payload) if _topic_matches(post, topic)]
+    by_community: dict[str, list[dict[str, Any]]] = {}
+    for post in matches:
+        by_community.setdefault(str(post.get("community") or "unknown"), []).append(post)
+
+    theme_communities: dict[str, set[str]] = {}
+    differences = []
+    for community, posts in sorted(by_community.items()):
+        intents = Counter(str(post.get("post_intent") or "unknown") for post in posts)
+        themes = Counter(theme for post in posts for theme in post.get("pain_themes", []))
+        for theme in themes:
+            theme_communities.setdefault(theme, set()).add(community)
+        current_solutions = [
+            post.get("commercial_signals", {}).get("current_solution") for post in posts
+            if post.get("commercial_signals", {}).get("current_solution")
+        ]
+        evidence_types = Counter(str(post.get("evidence_type") or "context_evidence") for post in posts)
+        differences.append({
+            "community": community,
+            "post_count": len(posts),
+            "dominant_intents": [name for name, _ in intents.most_common(3)],
+            "top_pain_themes": [name for name, _ in themes.most_common(4)],
+            "common_current_solutions": list(dict.fromkeys(current_solutions))[:5],
+            "evidence_types": dict(evidence_types),
+            "sample_urls": [post.get("url") for post in posts[:3] if post.get("url")],
+        })
+
+    return {
+        "topic": topic,
+        "matched_posts": len(matches),
+        "matched_communities": len(by_community),
+        "shared_pains": sorted(theme for theme, communities in theme_communities.items() if len(communities) >= 2),
+        "community_differences": differences,
+        "interpretation": {
+            "surface_problem": "See shared_pains and community_differences; no aggregate opportunity score is calculated.",
+            "possible_root_problem": "unknown — requires human review of the cited evidence and counter-evidence.",
+        },
+    }
+
+
+def cmd_compare_communities(args: argparse.Namespace) -> int:
+    with open(args.input, encoding="utf-8") as f:
+        payload = json.load(f)
+    result = compare_communities(payload, args.topic)
+    _write_out({
+        "command": "compare-communities", "schema_version": "2.1",
+        "as_of": utc_now().isoformat(), **result,
+    }, args.out)
+    return 0
+
+
+def cmd_analyze_research(args: argparse.Namespace) -> int:
+    with open(args.input, encoding="utf-8") as f:
+        payload = json.load(f)
+    result = analyze_research(payload)
+    _write_out({"command": "analyze-research", "as_of": utc_now().isoformat(), **result}, args.out)
+    return 0
+
+
+def cmd_render_report(args: argparse.Namespace) -> int:
+    """Render a complete, source-linked Markdown report from a JSON result."""
+    with open(args.input, encoding="utf-8") as f:
+        payload = json.load(f)
+    text = render_report(payload)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(text)
+    else:
+        print(text, end="")
     return 0
 
 
@@ -491,6 +1030,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
     results.sort(key=lambda x: x["heat_index"], reverse=True)
     payload = {
         "command": "discover",
+        "schema_version": "2.1",
         "platform": "reddit",
         "as_of": utc_now().isoformat(),
         "window_hours": args.hours,
@@ -519,9 +1059,10 @@ def cmd_extract(args: argparse.Namespace) -> int:
     hits.sort(key=lambda x: x.get("comments", 0) * 2 + x.get("score", 0), reverse=True)
     payload = {
         "command": "extract",
+        "schema_version": "2.1",
         "as_of": utc_now().isoformat(),
         "window_hours": args.hours,
-        "filters": {"min_score": args.min_score, "min_comments": args.min_comments},
+        "filters": {"min_score": args.min_score, "min_comments": args.min_comments, "intents": args.intents},
         "data_source": "arctic-shift.photon-reddit.com",
         "count": len(hits),
         "posts": hits,
@@ -535,6 +1076,7 @@ def cmd_hn_search(args: argparse.Namespace) -> int:
     hits_out = hn_search(args.query, args, after)
     payload = {
         "command": "hn-search",
+        "schema_version": "2.1",
         "platform": "hackernews",
         "as_of": utc_now().isoformat(),
         "query": args.query,
@@ -551,6 +1093,7 @@ def cmd_v2ex_hot(args: argparse.Namespace) -> int:
     hits_out = v2ex_fetch(args.node, args)
     payload = {
         "command": "v2ex-hot",
+        "schema_version": "2.1",
         "platform": "v2ex",
         "as_of": utc_now().isoformat(),
         "node": args.node or "hot",
@@ -566,6 +1109,7 @@ def cmd_browser_read(args: argparse.Namespace) -> int:
     result = browser_read_url(args.url, max_chars=args.max_chars)
     payload = {
         "command": "browser-read",
+        "schema_version": "2.1",
         "platform": "browser",
         "as_of": utc_now().isoformat(),
         "result": result,
@@ -576,21 +1120,13 @@ def cmd_browser_read(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Full pipeline: plan → discover → extract → HN/V2EX → combined JSON for Agent Step C."""
-    # Plan communities
-    plan_args = argparse.Namespace(
-        target=args.target,
-        subs=args.subs,
-        hn_query=args.hn_query,
-        v2ex_node=args.v2ex_node,
-        plan_json=args.plan_json,
-        out=None,
-    )
     if args.subs:
         plan = infer_communities(args.target)
         plan["reddit_subs"] = [s.strip() for s in args.subs.split(",") if s.strip()]
     elif args.plan_json:
         with open(args.plan_json, encoding="utf-8") as f:
-            plan = json.load(f)
+            loaded_plan = json.load(f)
+        plan = loaded_plan.get("plan", loaded_plan) if isinstance(loaded_plan, dict) else {}
     else:
         plan = infer_communities(args.target)
 
@@ -598,6 +1134,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         plan["hn_queries"] = [q.strip() for q in args.hn_query.split("|") if q.strip()]
     if args.v2ex_node:
         plan["v2ex_nodes"] = [n.strip() for n in args.v2ex_node.split(",") if n.strip()]
+
+    if args.profile_communities and not plan.get("community_profiles"):
+        plan["community_profiles"] = profile_plan_communities(plan, args.target, args)
 
     subs = plan.get("reddit_subs", [])[: args.max_subs]
     after = int(utc_now().timestamp() - args.hours * 3600)
@@ -632,7 +1171,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     # Step B: HN supplement (English / SaaS / dev targets)
     hn_posts: list[dict] = []
     if not args.no_hn and plan.get("hn_queries"):
-        for q in plan["hn_queries"][:2]:
+        hn_queries = list(plan["hn_queries"][:2])
+        if args.intent_query_expansion:
+            hn_queries.extend(
+                queries[0] for queries in plan.get("intent_queries", {}).values() if queries
+            )
+        for q in list(dict.fromkeys(hn_queries))[:args.max_hn_queries]:
             time.sleep(args.delay)
             hn_posts.extend(hn_search(q, args, after))
 
@@ -655,18 +1199,31 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     all_posts = reddit_posts + hn_posts + v2ex_posts
     all_posts.sort(key=lambda x: x.get("comments", 0) * 2 + x.get("score", 0), reverse=True)
+    research_analysis = analyze_research({"target": args.target, "step_b": {"posts": all_posts}}) if args.analyze else None
+    if research_analysis:
+        all_posts = research_analysis["posts"]
 
+    captured_at = utc_now().isoformat()
     payload = {
         "command": "run",
-        "version": "2.0",
-        "as_of": utc_now().isoformat(),
+        "version": "2.2.0",
+        "schema_version": "2.2" if research_analysis else "2.1",
+        "as_of": captured_at,
         "target": args.target,
+        "target_profile": parse_target(args.target),
+        "research_scope": {
+            "started_at": captured_at,
+            "time_window_hours": args.hours,
+            "platforms": ["reddit"] + ([] if args.no_hn else ["hackernews"]) + ([] if args.no_v2ex else ["v2ex"]),
+            "login_required": False,
+        },
         "plan": plan,
         "window_hours": args.hours,
-        "filters": {"min_score": args.min_score, "min_comments": args.min_comments},
+        "filters": {"min_score": args.min_score, "min_comments": args.min_comments, "intents": args.intents},
         "step_a": {
             "qualified_communities": qualified,
             "all_communities": all_subs,
+            "community_profiles": plan.get("community_profiles", []),
         },
         "step_b": {
             "posts_by_platform": {
@@ -677,7 +1234,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             "posts": all_posts,
             "browser_fallback": browser_notes if browser_notes else None,
         },
-        "step_c_hint": "Agent: cluster pains → 5 micro-products → best pick → 10 hooks. Map each idea to ≥1 post.",
+        "step_c_hint": "Agent: separate supporting and counter evidence; cluster pains by task → obstacle; compare community differences before proposing opportunities.",
+        "analysis": research_analysis,
         "total_posts": len(all_posts),
     }
     _write_out(payload, args.out)
@@ -704,6 +1262,8 @@ def _add_common_scan_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--min-active-threads", type=int, default=5)
     p.add_argument("--min-score", type=int, default=50)
     p.add_argument("--min-comments", type=int, default=20)
+    p.add_argument("--intents", default=None,
+                   help="Comma-separated post intents to retain (for example complaint,alternative_search)")
     p.add_argument("--fetch-comments", action="store_true")
     p.add_argument("--browser-fallback", action="store_true", default=True)
     p.add_argument("--no-browser-fallback", action="store_false", dest="browser_fallback")
@@ -721,8 +1281,41 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--hn-query", default=None, help="Override HN queries (pipe-separated)")
     pl.add_argument("--v2ex-node", default=None, help="Override V2EX nodes (comma-separated)")
     pl.add_argument("--plan-json", default=None, help="Load plan from JSON file")
+    pl.add_argument("--profile-communities", action="store_true",
+                    help="Fetch public community profiles for inferred Reddit candidates")
+    pl.add_argument("--profile-limit", type=int, default=30)
+    pl.add_argument("--cache-dir", default=".pain-miner-cache/communities")
+    pl.add_argument("--refresh-profiles", action="store_true")
+    pl.add_argument("--no-rules", action="store_true", help="Skip public rules-page lookup during profiling")
+    pl.add_argument("--delay", type=float, default=1.2)
     pl.add_argument("--out", default=None)
     pl.set_defaults(func=cmd_plan)
+
+    pc = sub.add_parser("profile-community", help="Profile one public Reddit community")
+    pc.add_argument("--platform", choices=["reddit"], default="reddit")
+    pc.add_argument("--community", required=True, help="Subreddit name without r/")
+    pc.add_argument("--limit", type=int, default=30)
+    pc.add_argument("--cache-dir", default=".pain-miner-cache/communities")
+    pc.add_argument("--refresh", action="store_true")
+    pc.add_argument("--no-rules", action="store_true", help="Skip public rules-page lookup")
+    pc.add_argument("--out", default=None)
+    pc.set_defaults(func=cmd_profile_community)
+
+    cc = sub.add_parser("compare-communities", help="Compare a topic across communities in an existing result JSON")
+    cc.add_argument("--input", required=True, help="JSON output from run, extract, hn-search, or v2ex-hot")
+    cc.add_argument("--topic", required=True, help="Topic phrase used to select evidence")
+    cc.add_argument("--out", default=None)
+    cc.set_defaults(func=cmd_compare_communities)
+
+    ar = sub.add_parser("analyze-research", help="Build deduplication, pain signal panels, comparisons, and opportunity cards")
+    ar.add_argument("--input", required=True, help="JSON output from run, extract, hn-search, or v2ex-hot")
+    ar.add_argument("--out", default=None)
+    ar.set_defaults(func=cmd_analyze_research)
+
+    rr = sub.add_parser("render-report", help="Render a complete source-linked Markdown research report")
+    rr.add_argument("--input", required=True, help="JSON output from run or analyze-research")
+    rr.add_argument("--out", default=None, help="Markdown output path; prints to stdout if omitted")
+    rr.set_defaults(func=cmd_render_report)
 
     r = sub.add_parser("run", help="Full pipeline: plan + discover + extract + supplements")
     r.add_argument("--target", required=True)
@@ -731,6 +1324,17 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--v2ex-node", default=None)
     r.add_argument("--plan-json", default=None)
     r.add_argument("--max-subs", type=int, default=10)
+    r.add_argument("--profile-communities", action="store_true",
+                   help="Attach cached public profiles to Reddit candidates before collection")
+    r.add_argument("--profile-limit", type=int, default=30)
+    r.add_argument("--cache-dir", default=".pain-miner-cache/communities")
+    r.add_argument("--refresh-profiles", action="store_true")
+    r.add_argument("--no-rules", action="store_true", help="Skip public rules-page lookup during profiling")
+    r.add_argument("--analyze", action="store_true", help="Attach structured pain clusters and opportunity cards to run output")
+    r.add_argument("--intent-query-expansion", action="store_true",
+                   help="Add intent-shaped HN queries from the generated plan")
+    r.add_argument("--max-hn-queries", type=int, default=6,
+                   help="Maximum HN queries when --intent-query-expansion is enabled")
     r.add_argument("--min-total-posts", type=int, default=5,
                    help="Trigger browser fallback if fewer posts found")
     r.add_argument("--no-hn", action="store_true")
@@ -754,6 +1358,7 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("--limit", type=int, default=50)
     h.add_argument("--min-score", type=int, default=50)
     h.add_argument("--min-comments", type=int, default=20)
+    h.add_argument("--intents", default=None)
     h.add_argument("--out", default=None)
     h.set_defaults(func=cmd_hn_search)
 
@@ -761,6 +1366,7 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--node", default=None)
     v.add_argument("--limit", type=int, default=30)
     v.add_argument("--min-comments", type=int, default=20)
+    v.add_argument("--intents", default=None)
     v.add_argument("--out", default=None)
     v.set_defaults(func=cmd_v2ex_hot)
 
