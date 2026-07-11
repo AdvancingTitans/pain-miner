@@ -11,6 +11,7 @@ Platforms (all login-free by default):
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import re
 import sys
@@ -20,6 +21,7 @@ import urllib.parse
 import urllib.request
 from collections import Counter
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +40,35 @@ HN_ALGOLIA = "https://hn.algolia.com/api/v1/search"
 V2EX_HOT = "https://www.v2ex.com/api/topics/hot.json"
 V2EX_NODE = "https://www.v2ex.com/api/topics/show.json"
 JINA_READER = "https://r.jina.ai/{url}"
+
+# Public endpoints are shared resources.  These defaults deliberately favour
+# fewer requests over a marginally faster report; override only for a source
+# owner's documented allowance.
+HTTP_MAX_RETRIES = max(0, int(os.getenv("PAIN_MINER_HTTP_MAX_RETRIES", "1")))
+SOURCE_MIN_INTERVAL_SECONDS = max(0.0, float(os.getenv("PAIN_MINER_SOURCE_MIN_INTERVAL", "1.2")))
+HTTP_RETRYABLE_CODES = {408, 425, 500, 502, 503, 504}
+HTTP_USER_AGENT = "pain-miner/2.3.1 (+https://github.com/AdvancingTitans/pain-miner)"
+_SOURCE_LAST_REQUEST: dict[str, float] = {}
+_SOURCE_CIRCUITS: dict[str, str] = {}
+_REDDIT_POST_CACHE: dict[tuple[str, int], list[dict]] = {}
+_REDDIT_COMMENT_CACHE: dict[tuple[str, int], list[dict]] = {}
+
+
+class SourceCircuitOpen(RuntimeError):
+    """A source has returned a terminal block/rate limit in this process."""
+
+    def __init__(self, host: str, reason: str):
+        self.host = host
+        self.reason = reason
+        super().__init__(f"{host} circuit open: {reason}")
+
+
+def reset_runtime_state() -> None:
+    """Clear per-process pacing, circuit-breaker, and listing caches (mainly tests)."""
+    _SOURCE_LAST_REQUEST.clear()
+    _SOURCE_CIRCUITS.clear()
+    _REDDIT_POST_CACHE.clear()
+    _REDDIT_COMMENT_CACHE.clear()
 
 # Keyword → community hints (expandable; Agent may override via --subs/--hn-query/--v2ex-node)
 COMMUNITY_HINTS: list[dict[str, Any]] = [
@@ -220,16 +251,80 @@ def has_chinese(text: str) -> bool:
     return bool(re.search(r"[\u4e00-\u9fff]", text))
 
 
+def _host_for(url: str) -> str:
+    return urllib.parse.urlparse(url).netloc.lower()
+
+
+def _open_circuit(url: str, reason: str) -> None:
+    host = _host_for(url)
+    if host:
+        _SOURCE_CIRCUITS[host] = reason
+
+
+def _circuit_reason(url: str) -> str | None:
+    return _SOURCE_CIRCUITS.get(_host_for(url))
+
+
+def _retry_after_seconds(error: urllib.error.HTTPError) -> float | None:
+    value = error.headers.get("Retry-After") if error.headers else None
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            return max(0.0, (parsedate_to_datetime(value) - utc_now()).total_seconds())
+        except (TypeError, ValueError):
+            return None
+
+
+def _pace_source(host: str) -> None:
+    elapsed = time.monotonic() - _SOURCE_LAST_REQUEST.get(host, 0.0)
+    wait = SOURCE_MIN_INTERVAL_SECONDS - elapsed
+    if wait > 0:
+        time.sleep(wait)
+
+
+def _http_get(url: str, *, timeout: int, accept: str) -> bytes:
+    """Fetch conservatively: pace hosts, retry transient failures, and stop on blocks."""
+    host = _host_for(url)
+    if reason := _circuit_reason(url):
+        raise SourceCircuitOpen(host, reason)
+    request = urllib.request.Request(url, headers={
+        "User-Agent": HTTP_USER_AGENT,
+        "Accept": accept,
+        "Accept-Language": "en-US,en;q=0.8,zh-CN;q=0.6",
+    })
+    for attempt in range(HTTP_MAX_RETRIES + 1):
+        _pace_source(host)
+        _SOURCE_LAST_REQUEST[host] = time.monotonic()
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read()
+        except urllib.error.HTTPError as error:
+            if error.code == 429:
+                _open_circuit(url, "circuit_open_after_429")
+                raise
+            if error.code == 403:
+                _open_circuit(url, "circuit_open_after_403")
+                raise
+            if error.code not in HTTP_RETRYABLE_CODES or attempt == HTTP_MAX_RETRIES:
+                raise
+        except urllib.error.URLError:
+            if attempt == HTTP_MAX_RETRIES:
+                raise
+        # ponytail: one bounded retry protects public services without turning
+        # a temporary failure into a request storm; increase only with a source SLA.
+        time.sleep(min(4.0, 1.0 * (2 ** attempt)))
+    raise RuntimeError("unreachable retry state")
+
+
 def http_get_json(url: str, timeout: int = 60) -> Any:
-    req = urllib.request.Request(url, headers={"User-Agent": "pain-miner/2.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.load(resp)
+    return json.loads(_http_get(url, timeout=timeout, accept="application/json, */*;q=0.1").decode("utf-8"))
 
 
 def http_get_text(url: str, timeout: int = 90) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "pain-miner/2.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+    return _http_get(url, timeout=timeout, accept="text/plain, text/html;q=0.9, */*;q=0.1").decode("utf-8", errors="replace")
 
 
 def clean_text(text: str, limit: int = 500) -> str:
@@ -455,24 +550,35 @@ def infer_communities(target: str) -> dict[str, Any]:
 
 
 def fetch_reddit_posts(sub: str, limit: int = 100) -> list[dict]:
+    key = (sub.lower(), limit)
+    if key in _REDDIT_POST_CACHE:
+        return _REDDIT_POST_CACHE[key]
     params = urllib.parse.urlencode({"subreddit": sub, "limit": limit, "sort": "desc"})
     url = f"{ARCTIC_POSTS}?{params}"
     try:
-        return http_get_json(url).get("data", [])
+        posts = http_get_json(url).get("data", [])
     except urllib.error.HTTPError as e:
         if e.code == 422 and limit > 50:
             params = urllib.parse.urlencode({"subreddit": sub, "limit": 50, "sort": "desc"})
-            return http_get_json(f"{ARCTIC_POSTS}?{params}").get("data", [])
-        raise
+            posts = http_get_json(f"{ARCTIC_POSTS}?{params}").get("data", [])
+        else:
+            raise
+    _REDDIT_POST_CACHE[key] = posts
+    return posts
 
 
 def fetch_reddit_comments(post_id: str, limit: int = 100) -> list[dict]:
+    key = (post_id, limit)
+    if key in _REDDIT_COMMENT_CACHE:
+        return _REDDIT_COMMENT_CACHE[key]
     params = urllib.parse.urlencode({"link_id": f"t3_{post_id}", "limit": limit})
     url = f"{ARCTIC_COMMENTS}?{params}"
     try:
-        return http_get_json(url).get("data", [])
+        comments = http_get_json(url).get("data", [])
     except urllib.error.HTTPError:
-        return []
+        comments = []
+    _REDDIT_COMMENT_CACHE[key] = comments
+    return comments
 
 
 def fetch_reddit_pullpush(sub: str, after: int, size: int = 50) -> list[dict]:
@@ -492,6 +598,8 @@ def fetch_reddit_pullpush(sub: str, after: int, size: int = 50) -> list[dict]:
 
 def _source_error_status(error: Exception) -> tuple[str, str]:
     """Turn transport failures into actionable source states, never a fake empty result."""
+    if isinstance(error, SourceCircuitOpen):
+        return "rate_limited" if error.reason.endswith("429") else "unavailable", error.reason
     if isinstance(error, urllib.error.HTTPError):
         if error.code == 403:
             return "unavailable", "403_network_policy"
@@ -520,6 +628,9 @@ def _source_health(events: list[dict[str, Any]], source: str, post_count: int, *
 def browser_read_url(url: str, max_chars: int = 8000) -> dict[str, Any]:
     """Login-free page read via Jina Reader."""
     jina_url = JINA_READER.format(url=urllib.parse.quote(url, safe=""))
+    if reason := _circuit_reason(jina_url):
+        return {"ok": False, "url": url, "via": "r.jina.ai", "error_class": reason,
+                "error": "Jina Reader is paused for this run after a terminal response."}
     try:
         text = http_get_text(jina_url)
         if any(pattern in text.lower() for pattern in BLOCKED_PAGE_PATTERNS):
@@ -529,7 +640,11 @@ def browser_read_url(url: str, max_chars: int = 8000) -> dict[str, Any]:
             }
         return {"ok": True, "url": url, "via": "r.jina.ai", "text": text[:max_chars]}
     except Exception as e:
-        return {"ok": False, "url": url, "via": "r.jina.ai", "error": str(e)}
+        status, reason = _source_error_status(e)
+        if isinstance(e, urllib.error.HTTPError) and e.code in {403, 429}:
+            _open_circuit(jina_url, "circuit_open_after_429" if e.code == 429 else "circuit_open_after_403")
+        return {"ok": False, "url": url, "via": "r.jina.ai", "error_class": reason,
+                "error": str(e), "source_status": status}
 
 
 def top_comment_phrases(comments: list[dict], n: int = 3) -> list[str]:
@@ -1204,7 +1319,8 @@ def _probe_json_source(name: str, url: str) -> dict[str, str]:
 
 def diagnose_sources() -> dict[str, dict[str, str]]:
     """Probe each public route once so an agent can choose a viable collection plan."""
-    arctic_url = f"{ARCTIC_POSTS}?{urllib.parse.urlencode({'subreddit': 'SaaS', 'limit': 1, 'sort': 'desc'})}"
+    # Arctic Shift accepts a practical listing size more reliably than `limit=1`.
+    arctic_url = f"{ARCTIC_POSTS}?{urllib.parse.urlencode({'subreddit': 'SaaS', 'limit': 50, 'sort': 'desc'})}"
     pullpush_url = f"{PULLPUSH}?{urllib.parse.urlencode({'subreddit': 'SaaS', 'size': 1, 'sort': 'desc'})}"
     results = {
         "arctic_shift": _probe_json_source("arctic_shift", arctic_url),
@@ -1313,10 +1429,12 @@ def cmd_run(args: argparse.Namespace) -> int:
             br = browser_read_url(url)
             browser_notes.append(br)
             source_events.append({
-                "source": "jina_old_reddit", "status": "ok" if br.get("ok") else "unavailable",
+                "source": "jina_old_reddit", "status": "ok" if br.get("ok") else br.get("source_status", "unavailable"),
                 "reason": br.get("error_class") or br.get("error"), "url": url,
             })
             print(f"browser fallback: {url} ok={br.get('ok')}", file=sys.stderr)
+            if br.get("error_class") in {"429_rate_limit", "circuit_open_after_429", "circuit_open_after_403"}:
+                break
 
     collected_posts = reddit_posts + hn_posts + v2ex_posts
     for post in collected_posts:
@@ -1340,7 +1458,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     captured_at = utc_now().isoformat()
     payload = {
         "command": "run",
-        "version": "2.3.0",
+        "version": "2.3.1",
         "schema_version": "2.3" if research_analysis else "2.1",
         "as_of": captured_at,
         "target": args.target,

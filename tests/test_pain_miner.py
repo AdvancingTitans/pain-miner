@@ -3,6 +3,7 @@ import importlib.util
 import sys
 import json
 import tempfile
+import urllib.error
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -17,6 +18,9 @@ SPEC.loader.exec_module(pain_miner)
 
 
 class PainMinerTests(unittest.TestCase):
+    def setUp(self):
+        pain_miner.reset_runtime_state()
+
     def test_all_new_and_existing_commands_parse(self):
         parser = pain_miner.build_parser()
         self.assertEqual(parser.parse_args(["run", "--target", "founders"]).command, "run")
@@ -65,6 +69,27 @@ class PainMinerTests(unittest.TestCase):
             result = pain_miner.browser_read_url("https://old.reddit.com/r/SaaS")
         self.assertFalse(result["ok"])
         self.assertEqual(result["error_class"], "reddit_edge_block")
+
+    def test_reddit_listing_is_reused_within_one_run(self):
+        with patch.object(pain_miner, "http_get_json", return_value={"data": [{"id": "a"}]}) as get_json:
+            first = pain_miner.fetch_reddit_posts("SaaS", limit=25)
+            second = pain_miner.fetch_reddit_posts("SaaS", limit=25)
+        self.assertEqual(first, second)
+        self.assertEqual(get_json.call_count, 1)
+
+    def test_rate_limited_jina_opens_a_circuit_and_avoids_a_second_request(self):
+        error = urllib.error.HTTPError(
+            "https://r.jina.ai/example", 429, "Too Many Requests", {"Retry-After": "60"}, None,
+        )
+        with patch.object(pain_miner, "http_get_text", side_effect=error) as get_text:
+            first = pain_miner.browser_read_url("https://old.reddit.com/r/SaaS")
+            second = pain_miner.browser_read_url("https://old.reddit.com/r/Entrepreneur")
+        error.close()
+        self.assertFalse(first["ok"])
+        self.assertEqual(first["error_class"], "429_rate_limit")
+        self.assertFalse(second["ok"])
+        self.assertEqual(second["error_class"], "circuit_open_after_429")
+        self.assertEqual(get_text.call_count, 1)
 
     def test_diagnose_reports_each_public_source_without_conflating_blocked_jina(self):
         with patch.object(pain_miner, "_probe_json_source", return_value={"status": "ok", "reason": "probe_ok"}), patch.object(

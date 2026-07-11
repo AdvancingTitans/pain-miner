@@ -14,7 +14,7 @@
 | Twitter/X | ❌ 不纳入 | 需 cookie | |
 | LinkedIn | ❌ 不纳入 | 需登录 | |
 | 小红书 | ❌ 不纳入 | 需 token | |
-| Reddit 匿名 .json | ❌ | 403 | |
+| Reddit 匿名 `.json` | ❌ | 常见 403 | 不重试；需用户授权的登录态/既有 API 凭证 |
 | Dev.to / Lobsters | ❌ | 可访问但痛点密度低 | |
 
 ---
@@ -38,7 +38,7 @@ GET https://arctic-shift.photon-reddit.com/api/comments/search?link_id=t3_{POST_
 | `permalink` | → `https://www.reddit.com{permalink}` |
 
 **限制**：无全局 sub 搜索 API → 社区发现靠 `plan-communities` 关键词推断 + Agent 修正 `--subs`。  
-422 → `limit=50`；请求间隔 ≥ 1.2s。若仍失败，记录 `source_events`，切换 HN-first，不得把失败伪装为社区无讨论。
+422 → `limit=50`；默认同一主机请求间隔 ≥ 1.2s，临时 5xx/网络失败最多重试一次。一个运行内对同一 subreddit 的发现与提取会复用 Arctic Shift 列表，避免重复取数。若收到 403/429，立即熔断该主机而非继续试探；记录 `source_events`，切换 HN-first，不得把失败伪装为社区无讨论。
 
 ### pullpush（末位兜底）
 
@@ -46,7 +46,7 @@ GET https://arctic-shift.photon-reddit.com/api/comments/search?link_id=t3_{POST_
 GET https://api.pullpush.io/reddit/search/submission/?subreddit={SUB}&size=50&sort=desc&sort_type=created_utc&after={UNIX}
 ```
 
-连续 3 次 429 则放弃，改浏览器兜底。
+收到 429 即停止该运行内的 Pullpush 请求，改 HN/V2EX；不要以并发、代理轮换或伪造身份规避限流。
 
 ### OpenCLI（可选，需登录）
 
@@ -55,7 +55,7 @@ agent-reach doctor --json   # reddit active_backend
 opencli reddit subreddit-info {SUB} -f yaml
 ```
 
-仅当用户环境已登录且 Arctic Shift 不可用。
+仅当用户环境已登录且 Arctic Shift 不可用。匿名 `.json` 的 403 与 Jina 读取 Reddit 时的拦截并非解析问题；Pain Miner 不尝试规避访问控制。用户若已自愿登录 Reddit，可通过 OpenCLI 进行授权读取。
 
 ---
 
@@ -108,7 +108,7 @@ python3 scripts/pain_miner.py browser-read \
   --url "https://old.reddit.com/r/SaaS/comments/abc123/title_here/"
 ```
 
-底层：`GET https://r.jina.ai/{url}` — 将公开页转为可读 Markdown，**无需 API key**。`whoa there, pardner`、`network policy`、`Blocked` 等内容是拦截页，CLI 会返回 `ok: false`、`error_class: reddit_edge_block`。
+底层：`GET https://r.jina.ai/{url}` — 将公开页转为可读 Markdown，**无需 API key**。`whoa there, pardner`、`network policy`、`Blocked` 等内容是拦截页，CLI 会返回 `ok: false`、`error_class: reddit_edge_block`。若返回 403/429，CLI 会标为 `403_network_policy` / `429_rate_limit` 并在当前运行内停止后续 Jina 请求。
 
 ### Agent 内置浏览器
 

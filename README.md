@@ -280,7 +280,7 @@ Twitter / LinkedIn / 小红书**不纳入**（需登录）。
 ## 常见问题
 
 **Q: 跑完热帖是 0 条？**  
-A: 先运行 `python3 scripts/pain_miner.py diagnose`。`degraded` / `unavailable` 是当前网络或源的状态，不代表社区没有讨论。可扩到 `--hours 336`、适度降低阈值；Reddit 不可用而 HN 正常时会自动扩展 HN-first 查询。若 `run --analyze` 返回码为 2，请阅读报告的“证据不足：下一步”，不要强行生成产品结论。
+A: 先运行 `python3 scripts/pain_miner.py diagnose`。`degraded` / `unavailable` 是当前网络或源的状态，不代表社区没有讨论。匿名 Reddit `.json` 的 403 及 Jina 的 403/429 均会被显式标记；脚本会按主机限速、复用本次运行已取到的 Reddit 列表，并在 403/429 后停止继续请求该源。可扩到 `--hours 336`、适度降低阈值；Reddit 不可用而 HN 正常时会自动扩展 HN-first 查询。若用户已有 Reddit 登录态，可按 `agent-reach doctor --json` 的提示用 OpenCLI 走授权读取；不要通过代理轮换或伪造身份绕过访问控制。若 `run --analyze` 返回码为 2，请阅读报告的“证据不足：下一步”，不要强行生成产品结论。
 
 **Q: 评论是空的？**  
 A: Arctic Shift 部分帖子评论 API 会 422。加 `--fetch-comments` 后脚本会尝试 Jina 读公开页；仍缺失会标空，不会编造。
